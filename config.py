@@ -66,14 +66,13 @@ RETRIEVAL_K = 8
 CANDIDATE_MULTIPLIER = 2   # fetch K*M raw hits, then keep best-per-document
 
 # --- Confidence thresholds ------------------------------------------------
-# Calibrated against measured distributions on the v3 index / eval probe
+# Calibrated against measured distributions on the v3/v4 index / eval probes
 # (2026-08-23): dev-question top similarities spanned 0.766–0.848,
 # off-domain negatives 0.623–0.719.
-# NOTE: score gating catches off-domain/nonsense questions; it cannot catch
-# in-domain topical misses by score alone (bge always finds something
-# plausible) — but HIGH is set at 0.80 so that mediocre retrieval like the
-# "override a controller" miss (top score 0.766, where the model fabricated
-# from keyword overlap) surfaces as "low" instead of "high".
+# Gating policy (service/main.py): ONLY "high" generates an LLM answer.
+# "low" (0.72–0.80) and "no_match" (< 0.72) both refuse deterministically —
+# mediocre retrieval (e.g. the "override a controller" miss at 0.766, where
+# the model fabricated from keyword overlap) must never reach the generator.
 CONFIDENCE_HIGH_MIN_SIMILARITY = 0.80
 # Just above the highest measured off-domain negative (0.719): anything
 # below this is treated as not-about-the-corpus -> no_match, no LLM call.

@@ -88,7 +88,18 @@ def ask(req: AskRequest) -> AskResponse:
 
     confidence = retriever.classify_confidence([c["score"] for c in chunks])
     if confidence == "no_match":
+        # Nothing even topically close: refuse, show nothing.
         return AskResponse(answer=NO_ANSWER, sources=[], confidence="no_match")
+    if confidence == "low":
+        # Retrieval was mediocre (top score below CONFIDENCE_HIGH_MIN):
+        # refuse deterministically — no LLM call, no chance of a
+        # confidently-wrong answer — but surface the nearest documents so
+        # the user can judge for themselves.
+        return AskResponse(
+            answer=NO_ANSWER,
+            sources=_dedupe_sources(chunks),
+            confidence="low",
+        )
 
     answer = generator.generate_answer(req.question, chunks)
     return AskResponse(

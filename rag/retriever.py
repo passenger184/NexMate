@@ -83,8 +83,16 @@ def retrieve(question: str, k: int | None = None) -> list[dict[str, Any]]:
 def classify_confidence(scores: list[float]) -> str:
     """Map retrieved similarities to the API's confidence signal.
 
-    Thresholds are starting values from config.py; recalibrate against
-    EVALUATION.md's test set (especially its negative cases).
+    Bands (thresholds in config.py, calibrated against measured
+    distributions on the v4 index):
+      >= HIGH  -> "high"     : generate an answer
+      >= LOW   -> "low"      : deterministic refusal, nearest sources shown,
+                              no LLM call — a mediocre match must never
+                              become a confidently-wrong answer
+      < LOW    -> "no_match" : nothing topically relevant at all
+
+    The service refuses on BOTH low and no_match; only "high" reaches the
+    generator.
     """
     if not scores:
         return "no_match"

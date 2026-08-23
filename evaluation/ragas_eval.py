@@ -66,9 +66,10 @@ def build_samples() -> tuple[list[dict], list[dict]]:
     for i, q in enumerate(QUESTIONS):
         chunks = retriever.retrieve(q)
         confidence = retriever.classify_confidence([c["score"] for c in chunks])
+        # Mirror service/main.py gating: only "high" reaches the generator;
+        # low/no_match are deterministic refusals.
         answer = (
-            NO_MATCH
-            if confidence == "no_match"
+            NO_MATCH if confidence != "high"
             else generator.generate_answer(q, chunks)
         )
         rows.append({

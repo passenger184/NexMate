@@ -50,10 +50,10 @@ def _split_front_matter(text: str) -> tuple[dict[str, str], str]:
         if ":" in line:
             key, _, value = line.partition(":")
             # wiki front-matter quirks: quoted values ("Title"), literal
-            # backslash-n escapes, and runs of tabs in some titles
+            # backslash-n / backslash-t escape sequences in some titles
             fields[key.strip()] = (
-                value.strip().strip("'\"").replace("\\n", " ")
-                .replace("\t", " ").strip()
+                value.strip().strip("'\"")
+                .replace("\\n", " ").replace("\\t", " ").strip()
             )
     return fields, text[match.end():]
 
