@@ -78,3 +78,55 @@ time.
 **Consequences:** Simpler to build and keep in sync; mode-based filtering
 (developer vs. employee, later) becomes a metadata filter, not a system
 swap.
+
+## [2026-08-23] Doc corpus sourced by crawling docs.frappe.io
+**Decision:** Ingest public docs by crawling `https://docs.frappe.io/erpnext`
+and `https://docs.frappe.io/framework` (sitemap.xml-driven), storing raw
+markdown locally before chunking.
+**Context:** The spec's preferred git-repo doc source no longer exists —
+Frappe moved both doc sites into its wiki platform around 2021 (verified:
+no docs dirs on `frappe/erpnext@version-15`, `frappe/frappe` branches;
+`github.com/frappe/docs` 404s). The wiki serves each page as clean markdown
+with YAML front-matter (`title`, `space`, `url`, `updated`) under
+CC-BY-SA 3.0. Sitemap lists ~6.7k URLs total; current-version ERPNext manual
+is ~2.7k pages, Framework ~650.
+**Alternatives considered:** Legacy `frappe/erpnext_documentation` repo
+(archived 2021, stale snapshot — rejected as outdated); scraping rendered
+HTML from docs.erpnext.com (messier than the wiki's native markdown).
+**Consequences:** Ingestion depends on the live site being reachable;
+a polite rate-limited crawler with local caching of fetched pages is part
+of the pipeline. Versioned subtrees (`/erpnext/v13|v14|v15/...`) exist and
+can be added later for version-awareness.
+
+## [2026-08-23] Hybrid chunking: MarkdownNodeParser + SentenceSplitter
+**Decision:** Chunk in two stages — split markdown by heading structure
+with LlamaIndex `MarkdownNodeParser`, then re-split any oversized section
+with `SentenceSplitter(chunk_size≈400 tokens, chunk_overlap=50)` — and tag
+every node with document title, section header-path, source URL, and
+`source_type: public_doc`.
+**Context:** Spec requires heading-based sections AND ~300–500 token chunks
+with ~50-token overlap. `MarkdownNodeParser` alone enforces no size cap and
+zero overlap (long Frappe tutorial pages would become single unusable
+chunks); `SentenceSplitter` alone would ignore headings. Neither tool does
+both. Also: parser splits correctly around code fences, which Frappe docs
+are full of.
+**Alternatives considered:** Pure `MarkdownNodeParser` (violates size
+target); pure fixed-window splitting (violates heading requirement);
+hand-rolled regex parser (reinvents tested library behavior).
+**Consequences:** Overlap occurs within oversized sections rather than
+across heading boundaries — accepted trade-off. Chroma metadata must stay
+scalar (str/int/float/bool) or ingestion will raise.
+
+## [2026-08-23] OLLAMA_BASE_URL mapped explicitly to litellm api_base
+**Decision:** `.env` keeps `OLLAMA_BASE_URL` (as documented throughout this
+repo); `rag/generator.py` reads it itself and passes it as litellm's explicit
+`api_base=` argument at the single completion call site.
+**Context:** litellm natively auto-reads an env var named
+`OLLAMA_API_BASE`, not `OLLAMA_BASE_URL` — silently assuming our variable
+name would make provider config appear broken when Ollama is remote
+(the normal case here: Windows-hosted, reached over network).
+**Alternatives considered:** Renaming the repo-wide variable to
+`OLLAMA_API_BASE` for native pickup (would contradict DEVELOPMENT.md /
+ARCHITECTURE.md / .env.example documentation).
+**Consequences:** One explicit mapping line in `generator.py`; if that file
+is ever refactored, the mapping must survive or remote Ollama breaks.

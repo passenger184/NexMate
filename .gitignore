@@ -1,0 +1,14 @@
+# Local config — never commit
+.env
+
+# Data: crawled docs cache + vector store (rebuildable from ingestion/)
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv-eval/
+
+# opencode local state
+.opencode/
