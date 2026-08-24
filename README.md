@@ -17,7 +17,8 @@ Docs are crawled once from `docs.frappe.io` (its official `{url}.md`
 markdown alternates) into `data/raw_docs/`, split heading-wise into
 ~400-token chunks, embedded locally with `BAAI/bge-small-en-v1.5`, and
 stored in a persistent Chroma collection (`data/chroma_db/`). At query
-time, FastAPI retrieves the top-k chunks (best per document), gates them by
+time, FastAPI retrieves top-k chunks via hybrid keyword+vector fusion
+(best per document), gates them by
 similarity score into `high | low | no_match`, and generates an answer via
 litellm using ONLY those chunks — provider/model configured entirely
 through `.env`.
