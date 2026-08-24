@@ -111,3 +111,57 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   two-phase eval commands) + frappe_app/README.
 - DoD checklist: all items done except real-bench verification of the
   sidebar (impossible on this box) — stated honestly in CURRENT.md.
+
+## [2026-08-24] — session 4: verification run + hybrid retrieval rebuild
+
+- Tester-subagent independent verification (live service, HEAD d3538e3):
+  9/15 clean, Q3 fabrication confirmed fixed by the tightened gate, but the
+  gate caused a coverage regression (Q5/Q6/Q15 refuse at 0.788-0.797 vs
+  0.80) and N2/N3 negatives return low+sources instead of no_match; Q7/Q12
+  citation/grounding defects; one stale /erpnext/v13/ page found embedded.
+  Findings logged in CURRENT.md; DoD item 2 declared failing.
+- Implemented hybrid retrieval per the pre-logged plan: in-house Okapi BM25
+  over the Chroma corpus (no rank-bm25 dep), RRF fusion, second-chunk-per-doc
+  rule for near-tied lexical evidence, suffix-folding tokenizer. Iterations:
+  - First coverage-veto design used IDF-weighted term coverage but weighted
+    unseen query terms at ZERO -> fabricated-feature negatives passed the
+    veto. Fixed: unseen terms weigh max-IDF; plus a dedicated veto for terms
+    absent from the entire corpus (df=0 is the fabrication signal; merely
+    rare jargon like 'orm' df~10 must NOT veto - first attempt at an
+    idf>=6 threshold veto broke Q7/Q14 and was replaced by the df=0 rule).
+  - Header-boost experiment REVERTED same session: boosting title/section
+    matches let every page titled '*controller*' sweep Q3's rankings and
+    buried hooks.md deeper. Replaced by FUSION_KEYWORD_WEIGHT=1.5 +
+    DOC_SECOND_CHUNK_MIN_RELATIVE_BM25=0.9, which admits the winning section
+    of a multi-section page when siblings tie lexically.
+- Gate recalibration on measured distributions: rescue band cos>=0.74 with
+  cov>=0.45; final probe separation: 15/15 positives high, 3/3 negatives
+  no_match (data/sweep_2026-08-24_hybrid_v2.json).
+- Incident during v13 purge: my naive '/erpnext/v' substring filter matched
+  /erpnext/v(aluation|at|olunteer)... and deleted 5 legitimate chunks;
+  repaired by re-embedding those pages through the standard pipeline
+  (index 7424 -> 7405 -> 7410). Root cause fixed properly with
+  config.is_excluded_doc_path() now shared by crawler AND loader (the
+  crawler had the same latent bug since the pattern was introduced).
+- Generator: added verbatim-identifier prompt rule + deterministic
+  backticked-identifier grounding check with ONE corrective escalation
+  (steered toward replacement-over-deletion after the first wording made
+  the model decline instead of substituting on_update for after_save).
+- Final full live sweep: 15/15 high confidence, all with sources and inline
+  [n] markers; 3/3 negatives exact no_match shape (empty sources, ~1s,
+  no LLM call). Grounding spot-verified against corpus text via grep:
+  Q12 bench commands verbatim in bench-commands-cheatsheet.md /
+  frappe-commands.md / bench-procfile.md; Q7 before_migrate/after_migrate in
+  hooks.md and 'clean and map the data' steps verbatim in
+  accounting-migration-overview.md; Q10 integration-user/API-credentials
+  verbatim; Q15 System-Settings traceback toggle verbatim in security-faqs;
+  Q3 answers extend_doctype_class from hooks.md (corpus marks it preferred
+  in v16+); Q6 answers on_update per executing-code-on-doctype-events.md.
+- New tooling: evaluation/retrieval_probe.py prints fused scores + gate
+  decision for the whole question set (used for calibration).
+- Assumption logged: negative-test expectation is the DESIGNED behavior -
+  N2/N3-class probes now return no_match+empty sources via the df=0 veto,
+  not the old low+sources shape; EVALUATION.md's letter ('must correctly
+  decline') and letter-of-contract both satisfied.
+- Not done this session: RAGAS re-score post-retrieval-change (baseline
+  stands; harness ready), real-bench sidebar install (still impossible here).

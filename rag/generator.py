@@ -18,6 +18,9 @@ from litellm import completion
 
 # An inline citation marker like [1], [2][3]
 _CITATION_RE = re.compile(r"\[\d+\]")
+# Backtick-quoted spans: the model's concrete identifiers (hooks, methods,
+# commands). Used for a deterministic grounding check against the context.
+_IDENTIFIER_RE = re.compile(r"`([^`\n]+)`")
 
 SYSTEM_PROMPT = """You are a documentation assistant for ERPNext and the \
 Frappe framework, answering a developer/admin user.
@@ -31,9 +34,12 @@ own knowledge about ERPNext/Frappe internals. This includes secondary \
 details: role requirements, version requirements, defaults, restarts or \
 other side effects must NOT be stated unless a passage explicitly says so \
 — never substitute your own role names, versions, or distinctions between \
-similar features that the passages don't make. Superficial keyword overlap \
-does NOT count as coverage: if no passage actually addresses what the user \
-asked, decline.
+similar features that the passages don't make. Every concrete identifier \
+you write — hook names, method names, CLI commands, config keys, JSON \
+fields — must appear VERBATIM in a passage. If the passages don't contain \
+the exact identifier the question asks about, say so and present only what \
+they DO cover. Superficial keyword overlap does NOT count as coverage: if \
+no passage actually addresses what the user asked, decline.
 3. Cite supporting passages inline with their numbers, like [1] or [2][3]. \
 Every substantive claim or step needs at least one citation marker next to \
 it; an answer with zero [n] markers is invalid.
@@ -75,6 +81,26 @@ def _complete(messages: list[dict[str, str]]) -> str:
         raise RuntimeError(f"Generation returned empty content "
                            f"({_model_string()}); not fabricating an answer")
     return answer.strip()
+
+
+def _ungrounded_identifiers(answer: str, chunks: list[dict[str, Any]]) -> list[str]:
+    """Backticked identifiers in the answer that appear in NO context chunk.
+
+    Small models leak training-knowledge identifiers (hook/command names the
+    corpus never mentions) even under grounded-only instructions. This is the
+    deterministic net for exactly that failure mode (Q6 'after_save', found
+    2026-08-24). Prose-y spans (spaces), very short ones, and templates are
+    skipped — only concrete-looking names are checked.
+    """
+    context = "\n".join(c["text"] for c in chunks)
+    bad: list[str] = []
+    for ident in _IDENTIFIER_RE.findall(answer):
+        name = ident.strip()
+        if len(name) < 4 or " " in name or "{" in name or "}" in name:
+            continue
+        if name not in context and name not in bad:
+            bad.append(name)
+    return bad
 
 
 def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
@@ -120,4 +146,28 @@ def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
         decline = (
             answer == "I don't have a confident answer for this in the knowledge base."
         )
+
+    # Grounding net for leaked identifiers: one corrective retry listing the
+    # offending names. If the model still can't produce a clean answer, it is
+    # returned as-is — the response contract carries no fabrication flag and
+    # silently discarding an otherwise-useful answer would trade one flaw for
+    # another; the sources list lets the user audit every claim.
+    if not decline:
+        ungrounded = _ungrounded_identifiers(answer, chunks)
+        if ungrounded:
+            listing = "; ".join(ungrounded[:8])
+            messages = messages + [
+                {"role": "assistant", "content": answer},
+                {"role": "user", "content": (
+                    f"Your response uses these identifiers that appear "
+                    f"NOWHERE in the context passages: {listing}. Rewrite "
+                    f"the response: for each one, either drop the claim or "
+                    f"replace it with what the passages ACTUALLY say using "
+                    f"their exact identifiers — prefer replacement over "
+                    f"deletion, and do not decline if the passages cover "
+                    f"the topic with different names. Keep the same "
+                    f"structure and keep the [n] citation markers."
+                )},
+            ]
+            answer = _complete(messages)
     return answer

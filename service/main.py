@@ -86,7 +86,7 @@ def ask(req: AskRequest) -> AskResponse:
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    confidence = retriever.classify_confidence([c["score"] for c in chunks])
+    confidence = retriever.classify_confidence(chunks, req.question)
     if confidence == "no_match":
         # Nothing even topically close: refuse, show nothing.
         return AskResponse(answer=NO_ANSWER, sources=[], confidence="no_match")

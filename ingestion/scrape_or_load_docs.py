@@ -35,7 +35,7 @@ def _is_doc_url(url: str) -> bool:
     path = urlparse(url).path
     if not any(path.startswith(p) for p in config.DOC_SPACE_PREFIXES):
         return False
-    if any(pat in path for pat in config.EXCLUDED_PATH_PATTERNS):
+    if config.is_excluded_doc_path(path):
         return False
     return True
 

@@ -130,3 +130,35 @@ name would make provider config appear broken when Ollama is remote
 ARCHITECTURE.md / .env.example documentation).
 **Consequences:** One explicit mapping line in `generator.py`; if that file
 is ever refactored, the mapping must survive or remote Ollama breaks.
+
+## [2026-08-24] Hybrid BM25+vector retrieval, recalibrated confidence gates
+**Decision:** Fuse an in-house Okapi BM25 index (`rag/keyword_index.py`, built
+lazily from the same Chroma collection) with cosine retrieval via Reciprocal
+Rank Fusion (keyword weight 1.5 vs vector 1.0). A document may take a second
+top-k slot only when another of its chunks has near-equal lexical evidence
+(>=0.9 of the page's best BM25). Confidence gates now combine signals:
+"high" = strong cosine OR solid cosine rescued by IDF-weighted query-term
+coverage; "no_match" = coverage veto OR a query token absent from the whole
+corpus (unless cosine clears the high bar). The generator gained a
+deterministic check that every backticked identifier exists in the retrieved
+context, with one corrective escalation.
+**Context:** The 2026-08-24 verification run showed pure-vector retrieval (a)
+burying exact-term pages (bench commands for Q12 sat outside top-8), (b) the
+max-cosine gate refusing questions whose correct page was already in the
+candidate pool (Q5/Q6/Q15 at 0.788-0.797 vs the 0.80 bar), and (c) the
+0.72-0.80 cosine band unable to separate keyword-overlap negatives
+(`frappe.auto_sync_with_jupiter` at 0.764) from hard positives (Q3 at 0.766).
+**Alternatives considered:** `rank-bm25` package (rejected: adds a dependency
+outside the locked stack for ~80 lines of fully specified math);
+title/section-heading score boost (tried and REVERTED same day: pages titled
+with generic query words swept the rankings and the target section sank
+further); raising k (does nothing for intra-document section selection or
+gating); purely prompt-side anti-fabrication rules (insufficient alone - a
+7B model leaks identifiers without a deterministic net).
+**Consequences:** Tokenizer suffix-folding (-s/-ing/-ed/final-e) applies
+identically to queries and corpus, trading stemming precision for recall;
+the BM25 index can never drift from the vector store since Chroma is its
+source of truth; corpus is now 7,410 chunks (one stale /erpnext/v13/ page
+purged, five collateral chunks repaired); `config.is_excluded_doc_path()`
+replaces naive substring matching in BOTH crawler and loader (the old
+substring also excluded legitimate /erpnext/v...aluation-style slugs).

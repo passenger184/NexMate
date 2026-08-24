@@ -73,6 +73,15 @@ def _load_documents(limit: int | None = None) -> list[Document]:
     skipped = 0
     seen_urls: set[str] = set()
     for path in files:
+        rel_path = path.relative_to(config.RAW_DOCS_DIR).with_suffix("")
+        rel_posix = f"/{rel_path.as_posix()}"
+        # Re-apply the crawler's scope rules here (not only at crawl time):
+        # stale cache entries from before a filter existed would otherwise
+        # still be embedded (found 2026-08-24: one /erpnext/v13/ page leaked
+        # into the v4 index and surfaced in answers' source lists).
+        if config.is_excluded_doc_path(rel_posix):
+            skipped += 1
+            continue
         try:
             raw = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
@@ -80,7 +89,6 @@ def _load_documents(limit: int | None = None) -> list[Document]:
             skipped += 1
             continue
         fields, body = _split_front_matter(raw)
-        rel_path = path.relative_to(config.RAW_DOCS_DIR).with_suffix("")
         # Deterministic canonical URL from the cached path structure,
         # independent of whether the page's own front-matter is well-formed.
         url = f"https://docs.frappe.io/{rel_path.as_posix()}"
