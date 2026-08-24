@@ -69,7 +69,7 @@ python -m ingestion.chunk_and_embed         # ~7 min, builds data/chroma_db/
 ```
 
 Expected scale: ~1,836 sitemap URLs match the doc spaces; ~1,000 distinct
-canonical pages survive dedupe; final index ≈ 7,400 chunks. The crawler
+canonical pages survive dedupe; final index ≈ 7,410 chunks. The crawler
 exits non-zero listing ~170 permanently-dead sitemap aliases in
 `data/raw_docs/_failed_urls.txt` — that is expected (they're dead or moved
 to other Frappe products), not a failure of the crawl itself.
