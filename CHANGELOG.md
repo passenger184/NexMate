@@ -6,6 +6,13 @@ part of completing meaningful units of work — not just at phase end.
 ## [Unreleased]
 
 ### Added
+- Phase 4 Project Memory: optional `session_id` on `/ask` (server-side
+  threads in `data/sessions/`, budgeted at read time), follow-up
+  condensation against conversation history before retrieval, `POST
+  /tools/session/reset`. Applied edits auto-index as `resolved_issue`
+  chunks (`tools/memory.py`, motive+message+diff) with
+  `--backfill-commit`; resolutions ride the boosted company pool and are
+  labeled "past fix" in prompts.
 - Phase 3 Company Knowledge: `ingestion/ingest_project.py` indexes this
   repo into the same Chroma collection (`our_code` via stdlib-ast boundary
   chunking, `company_doc` via heading splits; idempotent re-sync). Index:

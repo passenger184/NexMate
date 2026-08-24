@@ -1,8 +1,8 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 7: Phase 3 — Company Knowledge — built and verified; project corpus live in the index, DoD met)
-**Current phase:** Phase 3 — Company Knowledge (`docs/PHASE_3_SPEC.md`) — functionally complete, awaiting user acceptance
-**Current task:** None in flight. Proposed next: Phase 4 — Project Memory (`docs/PHASE_4_SPEC.md`), which builds directly on Phase 2's edit commits.
+**Last updated:** 2026-08-24 (session 8: Phase 4 — Project Memory — built and verified; session continuity + resolved-issue corpus live, DoD met)
+**Current phase:** Phase 4 — Project Memory (`docs/PHASE_4_SPEC.md`) — functionally complete, awaiting user acceptance
+**Current task:** None in flight. Proposed next: Phase 5 — Read-only ERPNext API tool (`ROADMAP.md`), which needs a reachable ERPNext instance to build against.
 
 ## Phase 2 closure note (2026-08-24)
 
@@ -10,6 +10,11 @@ Phase 2 accepted via user instruction to proceed. All six DoD items in
 `docs/PHASE_2_SPEC.md` verified (see the Phase 2 progress section below);
 the only bench-dependent leftover is the sidebar's diff/approve UI
 (`docs/UI_SPEC.md`), same conscious-deferral pattern as Phase 1.
+
+## Phase 3 closure note (2026-08-24)
+
+Phase 3 accepted via user instruction to proceed; verification table and
+DoD status below.
 
 ## Phase 3 — Company Knowledge: what changed
 
@@ -225,6 +230,59 @@ internal docs into the existing Chroma store under `our_code` /
 `company_doc` source-type tags. Note SECURITY.md's cloud-provider rule:
 before Phase 3 puts company material into retrieval prompts, re-confirm
 the `GENERATION_PROVIDER` choice with the user.
+
+## Phase 4 — Project Memory: what changed
+
+- **Session continuity** — `/ask` gains optional `session_id` (validated
+  against `[A-Za-z0-9_-]{1,64}` before touching disk). Threads persist as
+  JSON under `data/sessions/` (survive restarts), capped at
+  SESSION_MAX_TURNS/SESSION_MAX_CHARS at read time. `POST
+  /tools/session/reset` implements "start fresh" — clears thread state,
+  never touches indexed knowledge.
+- **Condense step for follow-ups** — per-turn retrieval runs BEFORE
+  generation, so anaphoric follow-ups ("which constant did you just
+  cite?") retrieve nothing alone and hit the absolute refusal. With a
+  live session, `generator.condense_followup` rewrites the question
+  against recent turns first (best-effort; falls back to raw question on
+  failure); retrieval + all confidence gates then run on the rewritten
+  query. Prompt demands verbatim symbols and no scaffolding filler.
+- **Resolved-issue corpus** — every applied Tier-2 edit now indexes ONE
+  chunk into the same collection (`source_type: resolved_issue`,
+  url_or_path `<file>@<hash>` so dedupe never collapses resolutions):
+  motive (proposal `context`) + commit message + diff. `tools/memory.py`
+  also provides `--backfill-commit`; the three real Phase 2 doc fixes were
+  backfilled with their true motivations, and the first post-feature edit
+  (`6235935`, README layout) auto-indexed via the apply flow.
+- resolved_issue chunks ride the boosted company pool; generator labels
+  them "past fix in this project".
+
+## Phase 4 verification (live)
+
+| Probe | Result |
+|---|---|
+| Continuity, second-order | "And what other constants sit next to it in that same config block?" → condensed using prior turns' symbols → high → "`RRF_K`, set to 60 in the `config.py` file [3]" |
+| Stateless control | Same follow-up without session_id → no memory of prior exchange |
+| Reset semantics | reset → cleared:true; subsequent turn has no memory; resolved-issue chunks STILL retrievable afterwards |
+| Resolution retrieval | "I remember the README used to have the wrong chunk count - what happened?" → high, recounts commit 8a520b3's story, sources led by `resolved_issue: README.md` |
+| Auto-indexing on apply | propose(context=…)→apply → `memory.indexed=true`, chunk `README.md@6235935` |
+| Backfills | 8a520b3 / 9552c00 / c986988 indexed with real motives |
+
+Known limitation (documented, not a bug): follow-ups whose OWN phrasing
+retrieves poorly can still land in `low` before condensation quality can
+save them when the small judge/generator model paraphrases instead of
+copying symbols (e.g. it wrote "dampens" where corpus says "dampener");
+turn-3-style symbol-bearing rewrites work.
+
+## Phase 4 DoD status (`docs/PHASE_4_SPEC.md`)
+
+- [x] Session continuity verified (incl. second-order anaphoric follow-up)
+- [x] ≥3 real Phase 2 edits indexed as resolved_issue chunks (3 backfilled
+      + 1 automatic = 4)
+- [x] Similar-question test retrieves and cites the resolution
+      (README chunk-count case, commit hash included)
+- [x] "Start fresh" clears visible thread without deleting resolved-issue
+      knowledge (verified live)
+- [x] `progress/CURRENT.md` updated (this document)
 
 ## Phase 2 progress
 

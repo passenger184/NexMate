@@ -292,3 +292,34 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   launched with setsid like any long-lived child — a timed-out parent
   shell otherwise takes the service down with its process group mid-probe.
 - Phase 3 sweep saved to data/phase3_sweep.json (P1–P6, D2, negatives).
+
+## [2026-08-24] — session 8: Phase 4 (Project Memory)
+
+- Session store: JSON files under data/sessions/, id validated against a
+  strict pattern BEFORE any path composition (traversal-proof), budgets
+  applied at read time, atomic writes via tmp+replace. Both sides of an
+  exchange stored per /ask call.
+- Key design find: per-turn retrieval runs before generation, so pure
+  anaphora ("which constant did you cite?") refuses at the gate before
+  memory can matter. Added condense_followup — one LLM call rewriting the
+  follow-up against history BEFORE retrieval; all gates then run on the
+  rewritten query unchanged. Two prompt iterations: v1 paraphrased
+  ("dampens" vs corpus "dampener") and kept filler ("which named..."),
+  sinking IDF-weighted coverage to 0.365 < 0.45 despite cos 0.756 and the
+  right #1 source; v2 demands verbatim symbols + no scaffolding. Turn-2
+  with this specific small model still won't copy RRF_K; turn-3-style
+  rewrites referencing BM25_K1/BM25_B work and correctly answered RRF_K=60.
+  Documented as model-compliance limitation, not architecture gap.
+- Resolved-issue memory: ONE chunk per applied edit (motive + message +
+  diff), url_or_path embeds commit hash so dedupe can't collapse multiple
+  resolutions of the same file. apply_edit indexes AFTER the commit (edit
+  already safe) but surfaces failures loudly in the response (`memory`
+  field). Backfills use --context supplied from actual knowledge of why
+  each doc fix happened — never invented.
+- Live verification: continuity incl. second-order follow-up answered
+  RRF_K=60 in config.py [3]; stateless control shows no memory;
+  reset clears thread but resolutions still retrieve ("README wrong chunk
+  count" → high, recounts 8a520b3); auto-index on real edit 6235935.
+- Dirty-tree gate refused my own first README edit attempt because Phase 4
+  implementation was uncommitted — correct behavior; committed prerequisite
+  d21c9ed first, exactly as designed.

@@ -23,6 +23,15 @@ class EditFlowTestBase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name).resolve()
         self.addCleanup(self._tmp.cleanup)
+        # apply_edit indexes resolutions into the REAL shared Chroma store;
+        # tests must never write there (found 2026-08-24: five fake
+        # app/service.py@<hash> chunks from throwaway repos had to be
+        # purged). Stub the memory hook for every edit test.
+        patcher = mock.patch("tools.memory.index_resolution",
+                             return_value={"indexed": True,
+                                           "url_or_path": "test-only"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.git("init", "-q")
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "Test")

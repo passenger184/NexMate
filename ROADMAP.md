@@ -14,8 +14,8 @@ explicitly reopens it.
 |---|---|---|---|
 | 1 | Pure RAG, Developer mode | Working RAG over public ERPNext/Frappe v16 docs, embedded sidebar UI, source citations | **Functionally complete (user-accepted 2026-08-24).** All eval questions pass with citations; negatives decline. Consciously deferred: real-bench sidebar install, RAGAS re-score post-hybrid-retrieval. |
 | 2 | Live code read/edit agent | Read/search/explain (always-on) + confirmed, git-checkpointed file edits, scoped to this project's root | Not started — **next** |
-| 3 | Company knowledge | This project's custom app source + internal docs/procedures added to the index as a tagged corpus | Not started |
-| 4 | Project memory | Session continuity + resolved-issue corpus fed by Phase 2's commits | Not started |
+| 3 | Company knowledge | This project's custom app source + internal docs/procedures added to the index as a tagged corpus | **Functionally complete (user-accepted 2026-08-24).** P1–P6 + dual-source preference verified; index 7,410 public + 321 project chunks |
+| 4 | Project memory | Session continuity + resolved-issue corpus fed by Phase 2's commits | **Functionally complete (2026-08-24).** Continuity proven incl. second-order follow-up; 4 resolutions indexed (3 backfilled + 1 auto) |
 | 5 | Read-only ERPNext API tool | Live-instance lookups (schemas, field values, doc status) | Not started |
 | 6 | Orchestrator/router | Routes between RAG, code agent, and ERPNext API tool; enforces version-awareness | Not started |
 | 7 | Employee/User mode | Restricted persona/prompt on the same orchestrator and knowledge base | Not started |
