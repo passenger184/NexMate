@@ -8,10 +8,17 @@ first, it tells you what everything else is for and what NOT to do.
 ## Read order
 
 1. `PROJECT.md` — what this is, who it's for, non-negotiable qualities
-2. `ARCHITECTURE.md` — full target system design + locked tech stack
+2. `ARCHITECTURE.md` — full target system design + locked tech stack +
+   workspace model
 3. `ROADMAP.md` — phase sequence and current phase pointer
-4. `docs/PHASE_1_SPEC.md` — the ONLY scope for current work
-5. `SECURITY.md` — guardrails, always in effect
+4. `docs/PHASE_1_SPEC.md`, `docs/PHASE_2_SPEC.md`, `docs/PHASE_3_SPEC.md`,
+   `docs/PHASE_4_SPEC.md` — only work on whichever phase `ROADMAP.md`
+   currently points to. `docs/FUTURE_MULTI_WORKSPACE.md` is reference
+   only — not current scope, do not build from it.
+5. `docs/UI_SPEC.md` — standing UI reference, applies from Phase 1 onward,
+   not gated to one phase
+5. `SECURITY.md` — guardrails, always in effect (includes hard rules for
+   the live code edit tool in Phase 2)
 6. `EVALUATION.md` — how "done" is verified
 7. `progress/CURRENT.md` — what's already been built, resume from here
 

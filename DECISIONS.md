@@ -68,6 +68,42 @@ works in daily.
 **Consequences:** UI work depends on Frappe's own frontend framework and
 app conventions rather than a general web stack.
 
+## [SUPERSEDED] One shared, workspace-aware service instead of one service per project
+**Status:** Superseded by the entry below — user chose to defer
+multi-workspace support entirely until the single-project system is mature.
+Original reasoning kept in `docs/FUTURE_MULTI_WORKSPACE.md` for when this
+is revisited.
+
+## Single-project scope, multi-workspace support deferred
+**Decision:** Build and operate this as a single-project system — one
+project root, one Chroma store, one service instance, no workspace
+registry or `workspace_id` concept anywhere in the current codebase.
+**Context:** User runs multiple local projects and eventually wants
+multi-project support, but chose to defer it until the single-project
+system (RAG, live code editing, company knowledge) is mature and proven,
+rather than adding workspace-routing complexity now.
+**Alternatives considered:** Building workspace-awareness now (see the
+superseded decision above) so it wouldn't need retrofitting later.
+**Consequences:** Simpler current codebase. When multi-workspace support
+is eventually built, `docs/FUTURE_MULTI_WORKSPACE.md` has the design
+already worked out — this is a deferred addition, not an unconsidered one.
+
+## Live code read/edit agent brought forward to Phase 2, gated by git
+**Decision:** Build a live code read/search/explain/edit tool earlier than
+originally planned (was bundled into the last, most-guarded phase), scoped
+to this project's root, with edits gated behind a clean git tree and
+per-edit confirmation.
+**Context:** User wants full read+edit capability now, not deferred behind
+company-knowledge and orchestrator phases.
+**Alternatives considered:** Keep it as the last phase per the original
+plan (safer sequencing, but doesn't meet what the user actually wants);
+build it with no git/confirmation gating (faster, but no undo path if the
+agent makes a bad edit).
+**Consequences:** This tool is explicitly scoped to source code only — it
+never writes to live ERPNext data. That capability (Phase 7) stays later
+and separately guarded, since a bad code edit is a `git revert` and a bad
+live data write generally is not.
+
 ## Single vector store with metadata tags, not parallel knowledge bases
 **Decision:** Public docs, company docs, and code all live in one Chroma
 store, distinguished by a `source_type` metadata field, filtered at query
@@ -78,87 +114,3 @@ time.
 **Consequences:** Simpler to build and keep in sync; mode-based filtering
 (developer vs. employee, later) becomes a metadata filter, not a system
 swap.
-
-## [2026-08-23] Doc corpus sourced by crawling docs.frappe.io
-**Decision:** Ingest public docs by crawling `https://docs.frappe.io/erpnext`
-and `https://docs.frappe.io/framework` (sitemap.xml-driven), storing raw
-markdown locally before chunking.
-**Context:** The spec's preferred git-repo doc source no longer exists —
-Frappe moved both doc sites into its wiki platform around 2021 (verified:
-no docs dirs on `frappe/erpnext@version-15`, `frappe/frappe` branches;
-`github.com/frappe/docs` 404s). The wiki serves each page as clean markdown
-with YAML front-matter (`title`, `space`, `url`, `updated`) under
-CC-BY-SA 3.0. Sitemap lists ~6.7k URLs total; current-version ERPNext manual
-is ~2.7k pages, Framework ~650.
-**Alternatives considered:** Legacy `frappe/erpnext_documentation` repo
-(archived 2021, stale snapshot — rejected as outdated); scraping rendered
-HTML from docs.erpnext.com (messier than the wiki's native markdown).
-**Consequences:** Ingestion depends on the live site being reachable;
-a polite rate-limited crawler with local caching of fetched pages is part
-of the pipeline. Versioned subtrees (`/erpnext/v13|v14|v15/...`) exist and
-can be added later for version-awareness.
-
-## [2026-08-23] Hybrid chunking: MarkdownNodeParser + SentenceSplitter
-**Decision:** Chunk in two stages — split markdown by heading structure
-with LlamaIndex `MarkdownNodeParser`, then re-split any oversized section
-with `SentenceSplitter(chunk_size≈400 tokens, chunk_overlap=50)` — and tag
-every node with document title, section header-path, source URL, and
-`source_type: public_doc`.
-**Context:** Spec requires heading-based sections AND ~300–500 token chunks
-with ~50-token overlap. `MarkdownNodeParser` alone enforces no size cap and
-zero overlap (long Frappe tutorial pages would become single unusable
-chunks); `SentenceSplitter` alone would ignore headings. Neither tool does
-both. Also: parser splits correctly around code fences, which Frappe docs
-are full of.
-**Alternatives considered:** Pure `MarkdownNodeParser` (violates size
-target); pure fixed-window splitting (violates heading requirement);
-hand-rolled regex parser (reinvents tested library behavior).
-**Consequences:** Overlap occurs within oversized sections rather than
-across heading boundaries — accepted trade-off. Chroma metadata must stay
-scalar (str/int/float/bool) or ingestion will raise.
-
-## [2026-08-23] OLLAMA_BASE_URL mapped explicitly to litellm api_base
-**Decision:** `.env` keeps `OLLAMA_BASE_URL` (as documented throughout this
-repo); `rag/generator.py` reads it itself and passes it as litellm's explicit
-`api_base=` argument at the single completion call site.
-**Context:** litellm natively auto-reads an env var named
-`OLLAMA_API_BASE`, not `OLLAMA_BASE_URL` — silently assuming our variable
-name would make provider config appear broken when Ollama is remote
-(the normal case here: Windows-hosted, reached over network).
-**Alternatives considered:** Renaming the repo-wide variable to
-`OLLAMA_API_BASE` for native pickup (would contradict DEVELOPMENT.md /
-ARCHITECTURE.md / .env.example documentation).
-**Consequences:** One explicit mapping line in `generator.py`; if that file
-is ever refactored, the mapping must survive or remote Ollama breaks.
-
-## [2026-08-24] Hybrid BM25+vector retrieval, recalibrated confidence gates
-**Decision:** Fuse an in-house Okapi BM25 index (`rag/keyword_index.py`, built
-lazily from the same Chroma collection) with cosine retrieval via Reciprocal
-Rank Fusion (keyword weight 1.5 vs vector 1.0). A document may take a second
-top-k slot only when another of its chunks has near-equal lexical evidence
-(>=0.9 of the page's best BM25). Confidence gates now combine signals:
-"high" = strong cosine OR solid cosine rescued by IDF-weighted query-term
-coverage; "no_match" = coverage veto OR a query token absent from the whole
-corpus (unless cosine clears the high bar). The generator gained a
-deterministic check that every backticked identifier exists in the retrieved
-context, with one corrective escalation.
-**Context:** The 2026-08-24 verification run showed pure-vector retrieval (a)
-burying exact-term pages (bench commands for Q12 sat outside top-8), (b) the
-max-cosine gate refusing questions whose correct page was already in the
-candidate pool (Q5/Q6/Q15 at 0.788-0.797 vs the 0.80 bar), and (c) the
-0.72-0.80 cosine band unable to separate keyword-overlap negatives
-(`frappe.auto_sync_with_jupiter` at 0.764) from hard positives (Q3 at 0.766).
-**Alternatives considered:** `rank-bm25` package (rejected: adds a dependency
-outside the locked stack for ~80 lines of fully specified math);
-title/section-heading score boost (tried and REVERTED same day: pages titled
-with generic query words swept the rankings and the target section sank
-further); raising k (does nothing for intra-document section selection or
-gating); purely prompt-side anti-fabrication rules (insufficient alone - a
-7B model leaks identifiers without a deterministic net).
-**Consequences:** Tokenizer suffix-folding (-s/-ing/-ed/final-e) applies
-identically to queries and corpus, trading stemming precision for recall;
-the BM25 index can never drift from the vector store since Chroma is its
-source of truth; corpus is now 7,410 chunks (one stale /erpnext/v13/ page
-purged, five collateral chunks repaired); `config.is_excluded_doc_path()`
-replaces naive substring matching in BOTH crawler and loader (the old
-substring also excluded legitimate /erpnext/v...aluation-style slugs).

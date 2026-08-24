@@ -6,6 +6,25 @@ This describes the full target architecture across all phases. Only the
 subset relevant to the current phase (see `ROADMAP.md`) should actually be
 built right now.
 
+## Target ERPNext/Frappe version
+
+Currently focused on **Frappe v16 / ERPNext v16**. Do not write
+version-hedging language that treats "current version" as ambiguous —
+treat v16 as the concrete target unless the user says otherwise. If a
+future phase needs to support multiple versions across different
+workspaces (see "Workspace model" below), that's an explicit decision to
+make then, not a default to build toward now.
+
+## Scope: single project for now
+
+This is currently built and scoped for **one project** — not multiple
+workspaces. Multi-project/workspace support is a real future direction
+(see `docs/FUTURE_MULTI_WORKSPACE.md`) but is explicitly **deferred** until
+the single-project system is mature and proven. Do not build workspace
+routing, a workspace registry, or a `workspace_id` parameter anywhere in
+the current codebase — there is exactly one project root, one Chroma
+store, one service, until a future decision reopens this.
+
 ## Full target architecture
 
 ```

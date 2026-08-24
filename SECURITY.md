@@ -2,6 +2,39 @@
 
 These apply regardless of phase and override convenience shortcuts.
 
+## Live code read/edit agent (Phase 2) — non-negotiable guardrails
+
+This tool operates on the user's actual project source code. These rules
+apply from the moment this tool exists, with no exceptions and no "just
+this once":
+
+- **Project-root scoping.** Every file operation must resolve to a path
+  inside this project's root (the one project this system is currently
+  scoped to — see `ARCHITECTURE.md`'s "Scope: single project for now").
+  Reject — don't sanitize, don't "helpfully" redirect — any path that
+  resolves outside it, including via `..` traversal or symlinks.
+- **Read/search/explain tools are always-on, no confirmation needed.**
+  Reading a file, searching code, or explaining an error is safe and
+  should not require the user to approve every lookup — that would make
+  the tool annoying to the point of being unused.
+- **Write tools require a clean git tree before they run.** If the
+  workspace's git status isn't clean, refuse the edit and tell the user to
+  commit or stash first. This is not optional — it's what makes every
+  subsequent edit revertible.
+- **Every edit is its own confirmed, atomic commit.** Show the user the
+  diff before applying it. Get explicit confirmation. Apply it, then commit
+  it with a clear message. Never batch multiple file edits into one
+  unreviewed commit.
+- **No edits to files outside version control**, and no edits to
+  git-ignored files (build artifacts, `.env`, credentials, `node_modules`,
+  etc.) — if a requested edit targets one, say so and ask how the user
+  wants to handle it rather than silently proceeding or silently skipping.
+- **This tool never touches live ERPNext data** — no document
+  creates/updates/deletes via the ERPNext API. That's a separate,
+  later-phase capability (Phase 7) with its own, stricter guardrails. Code
+  editing and data editing are different risk profiles and must stay
+  architecturally separate — not the same tool with different arguments.
+
 ## Current phase (RAG over public docs only)
 
 - No credentials, API keys, or company-internal data are needed or used —
