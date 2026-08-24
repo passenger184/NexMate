@@ -142,3 +142,33 @@ def list_documents(
         "rows": rows,
         "limit": limit,
     }
+
+
+def call_method(method: str, params: dict[str, Any] | None = None) -> Any:
+    """Read-only GET against /api/method/{method} (e.g. version lookups).
+
+    Still GET-only by construction. `method` is a dotted python path;
+    only dots and slashes survive quoting so no path games are possible.
+    Returns the raw JSON envelope ({"message": ...}) — callers decide.
+    """
+    base, key, secret = _credentials()
+    segment = quote(method.strip(), safe="./")
+    try:
+        response = requests.get(
+            f"{base}/api/method/{segment}",
+            params=params or None,
+            headers={"Authorization": f"token {key}:{secret}"},
+            timeout=config.ERPNEXT_TIMEOUT_SECONDS,
+        )
+    except requests.Timeout as exc:
+        raise ErpnextUnavailable(
+            f"ERPNext did not answer within {config.ERPNEXT_TIMEOUT_SECONDS}s"
+        ) from exc
+    except requests.RequestException as exc:
+        raise ErpnextUnavailable(f"ERPNext unreachable: {exc}") from exc
+    if response.status_code != 200:
+        raise ErpnextApiError(response.status_code, response.text[:300])
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise ErpnextApiError(502, "non-JSON body from ERPNext") from exc

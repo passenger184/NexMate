@@ -1,8 +1,13 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 9: Phase 5 — Read-only ERPNext API tool — built and verified against the live instance at localhost:8081; DoD met)
-**Current phase:** Phase 5 — Read-only ERPNext API tool (ROADMAP.md; no dedicated spec doc) — functionally complete, awaiting user acceptance
-**Current task:** None in flight. Proposed next: Phase 6 — Orchestrator/router, which routes between RAG, code agent, and this new ERPNext tool.
+**Last updated:** 2026-08-24 (session 10: Phase 6 — Orchestrator/router — built and verified; all four routes proven live with version-awareness)
+**Current phase:** Phase 6 — Orchestrator/router (ROADMAP.md) — functionally complete, awaiting user acceptance
+**Current task:** None in flight. Proposed next: Phase 7 — Employee/User mode (restricted persona on this orchestrator).
+
+## Phase 5 closure note (2026-08-24)
+
+Phase 5 accepted via user instruction to proceed (commit a029ddc); DoD met
+per the verification table below.
 
 ## Phase 4 closure note (2026-08-24)
 
@@ -210,11 +215,48 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
 
 ## Next step
 
-**Phase 5 is functionally complete** (see the Phase 5 section below).
-Upon user acceptance: start **Phase 6 — Orchestrator/router**
-(`ROADMAP.md`; no dedicated spec doc): route between the RAG engine, the
-code tools, and the ERPNext tool; enforce version-awareness.
-ARCHITECTURE.md's "AI Orchestrator" section now applies (2+ tools exist).
+**Phase 6 is functionally complete** (see below). Upon user acceptance:
+start **Phase 7 — Employee/User mode**: restricted persona/prompt on the
+same orchestrator and knowledge base (no new subsystems).
+
+## Phase 6 — Orchestrator/router: what changed
+
+- **`orchestrator.py`** — routes each question: `erpnext` (live-instance
+  data), `code` (this repo's source/errors), `rag` (default, general
+  knowledge). Deterministic hint overrides first; one LLM classifier call
+  breaks ties; ANY failure defaults to rag — routing can be wrong, never
+  fatal.
+- **Version-awareness (PROJECT.md non-negotiable)** — the connected
+  instance's Frappe/ERPNext versions are fetched read-only
+  (`frappe.utils.change_log.get_versions`, cached TTL 600s) and injected
+  into generation prompts on rag + erpnext branches: answers must be valid
+  for Frappe 16.31.0 / ERPNext 16.32.3, not "latest docs". Instance down
+  -> honest `status: unavailable`, answers continue without version
+  authority.
+- **ERPNext branch**: LLM extracts {op, doctype, name?, fields?,
+  filters?, limit?} as strict JSON (one corrective escalation for
+  fence/prose slips), executes the matching read-only client op, answers
+  ONLY from the returned payload with [1]-style citations +
+  identifier-grounding net.
+- **Scope-aware retrieval** — generic how-tos search PUBLIC docs only;
+  project-scoped questions (PROJECT_SCOPE_HINTS) keep the boosted company
+  pool. Root cause fixed: our own meta-docs quote eval questions verbatim,
+  so BM25 ranked EVALUATION.md/PROJECT.md above the real Frappe tutorial
+  for generic questions.
+- **`POST /orchestrate`** — single entry point; sessions behave like
+  /ask (routing runs on the condensed follow-up question).
+
+## Phase 6 verification (live POST /orchestrate)
+
+| Probe | Result |
+|---|---|
+| Live schema question | route=erpnext(heuristic) -> "Customer DocType has 87 fields", payload-cited, versions=live |
+| Honest empty count | "How many submitted Sales Orders..." -> "0 ... [1]" (instance truly has none) |
+| Code question | route=code -> pathsafe walkthrough citing tools/pathsafe.py with line spans |
+| Generic how-to | route=rag(classifier) -> public DocType tutorial leads; meta-file hijack GONE |
+| Scoped project Q | company corpus cited (ARCHITECTURE/DECISIONS/chunk_and_embed) |
+| Misroute guard | "What is a DocType conceptually?" stays rag, never touches the instance |
+| Version authority | frappe 16.31.0 / erpnext 16.32.3 in every response; image-markdown leak also fixed |
 
 ## Phase 5 — Read-only ERPNext API tool: what changed
 

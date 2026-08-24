@@ -62,6 +62,10 @@ ERPNEXT_MAX_RESPONSE_BYTES = 2_000_000   # schema/doc payloads can be chunky
 ERPNEXT_DEFAULT_LIST_LIMIT = 20
 ERPNEXT_MAX_LIST_LIMIT = 100
 
+# --- Orchestrator (Phase 6) ------------------------------------------------------
+# How long the live instance's version info is trusted before re-fetching.
+ORCHESTRATOR_VERSION_TTL_SECONDS = 600
+
 # --- Doc corpus ----------------------------------------------------------
 SITEMAP_URL = "https://docs.frappe.io/sitemap.xml"
 
@@ -143,10 +147,18 @@ BM25_B = 0.75              # Okapi document-length normalization
 FUSION_VECTOR_WEIGHT = 1.0
 FUSION_KEYWORD_WEIGHT = 1.5
 # Phase 3: project material (our_code/company_doc) gets a modest rank
-# boost in fusion, so when public docs AND this repo both cover a question,
-# the more specific company answer wins (PHASE_3_SPEC DoD). Modest on
-# purpose: it must never drag irrelevant code over genuinely-relevant docs.
+# boost in fusion — but ONLY for project-scoped questions. A generic
+# how-to ("how do I create a custom DocType?") must rank public docs on
+# merit; boosting company chunks that merely MENTION the topic hijacks
+# the answer (found live 2026-08-24, Phase 6 routing checks).
 FUSION_COMPANY_BOOST = 1.25
+# Substrings whose presence marks a question as about THIS repository.
+PROJECT_SCOPE_HINTS = (
+    "in this repo", "in this project", "this codebase", "this project",
+    "our code", "our repo", "our project", "the copilot",
+    "this assistant", "tools/", "rag/", "service/", "ingestion/",
+    "frappe_app",
+)
 # A document may take a SECOND top-k slot when another of its chunks carries
 # near-equal lexical evidence (bm25 >= this fraction of the page's best).
 # Huge multi-section pages (hooks.md: 94 chunks) otherwise lose the exact

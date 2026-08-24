@@ -125,14 +125,22 @@ def _cosine(query_vec: list[float], text: str) -> float:
     return float(np.dot(q, d) / denom) if denom else 0.0
 
 
-def retrieve(question: str, k: int | None = None) -> list[dict[str, Any]]:
+def retrieve(question: str, k: int | None = None,
+             include_company: bool = True) -> list[dict[str, Any]]:
     """Return top-k chunks fused across three signals.
 
     Vector similarity is retrieved as TWO pools — public docs and project
-    material (our_code/company_doc) — so the company pool can be boosted
-    explicitly instead of hoping 331 project chunks out-rank 7,410 doc
-    chunks on raw cosine. The third signal is global BM25. All three fuse
-    via Reciprocal Rank Fusion before best-chunk-per-document dedupe.
+    material (our_code/company_doc/resolved_issue) — so the company pool
+    can be boosted explicitly instead of hoping 321 project chunks out-rank
+    7,410 doc chunks on raw cosine. The third signal is global BM25. All
+    three fuse via Reciprocal Rank Fusion before best-chunk-per-document
+    dedupe.
+
+    include_company=False restricts everything (both vector pools AND the
+    BM25 list) to public framework docs — used by the orchestrator for
+    generic how-to questions, where this repo's own meta-docs (which QUOTE
+    eval questions verbatim) would otherwise out-rank the real answer
+    pages through pure keyword coincidence.
 
     Each result: {text, score, bm25_score, title, section, url_or_path,
     source_type}, best fused rank first.
@@ -146,7 +154,7 @@ def retrieve(question: str, k: int | None = None) -> list[dict[str, Any]]:
     )
     company_pool = _vector_pool(
         query_vec, {"source_type": {"$in": list(COMPANY_SOURCE_TYPES)}}, pool
-    )
+    ) if include_company else []
 
     candidates: dict[str, dict[str, Any]] = {}
     vector_orders: dict[str, list[str]] = {
@@ -165,6 +173,8 @@ def retrieve(question: str, k: int | None = None) -> list[dict[str, Any]]:
     keyword_hits = get_keyword_index().search(question, pool)
     keyword_order: list[str] = []
     for hit in keyword_hits:
+        if not include_company and hit.get("source_type") != "public_doc":
+            continue
         keyword_order.append(hit["id"])
         if hit["id"] in candidates:
             candidates[hit["id"]]["bm25_score"] = hit["bm25_score"]
@@ -197,15 +207,22 @@ def retrieve(question: str, k: int | None = None) -> list[dict[str, Any]]:
             candidates[cid]["score"] = _cosine(query_vec, text) if text else 0.0
 
     rrf: dict[str, float] = {}
-    boost = config.FUSION_COMPANY_BOOST
 
     def add_rank(cid: str, rank: int, weight: float) -> None:
         rrf[cid] = rrf.get(cid, 0.0) + weight / (config.RRF_K + rank)
 
+    # Company boost applies ONLY to project-scoped questions; generic
+    # how-tos must rank public docs on merit (found live 2026-08-24).
+    lowered = question.lower()
+    scoped = any(h in lowered for h in config.PROJECT_SCOPE_HINTS)
+    company_weight = config.FUSION_VECTOR_WEIGHT * (
+        config.FUSION_COMPANY_BOOST if scoped else 1.0
+    )
+
     for rank, cid in enumerate(vector_orders["public"], start=1):
         add_rank(cid, rank, config.FUSION_VECTOR_WEIGHT)
     for rank, cid in enumerate(vector_orders["company"], start=1):
-        add_rank(cid, rank, config.FUSION_VECTOR_WEIGHT * boost)
+        add_rank(cid, rank, company_weight)
     for rank, cid in enumerate(keyword_order, start=1):
         add_rank(cid, rank, config.FUSION_KEYWORD_WEIGHT)
 

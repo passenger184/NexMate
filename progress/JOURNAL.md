@@ -347,3 +347,29 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   roles table). Administrator doc -> clean 403 passthrough (Frappe-
   enforced), which doubles as the permission-behavior check.
 - 59/59 tests green. Endpoints: /tools/erpnext/schema|document|list.
+
+## [2026-08-24] — session 10: Phase 6 (Orchestrator/router)
+
+- Router design: deterministic hint overrides -> one LLM classifier call
+  (strict JSON route) -> default rag on ANY failure. Routing may be wrong,
+  never fatal. Version-awareness via cached read-only
+  change_log.get_versions (TTL 600s): live Frappe 16.31.0 / ERPNext
+  16.32.3 injected into rag + erpnext prompts; instance down degrades to
+  status=unavailable with empty preamble, answers continue.
+- ERPNext branch: LLM extracts {op,doctype,...} JSON; small model needed
+  the fence/prose-tolerant parser + ONE corrective escalation (first live
+  run returned conversational prose and the honest low-failure path fired;
+  after escalation "0 submitted Sales Orders... [1]" works).
+- Two retrieval findings fixed live:
+  (1) FUSION_COMPANY_BOOST hijacked GENERIC how-tos — but removing it
+  wasn't enough because (2) our own EVALUATION.md/PROJECT.md/ragas_eval.py
+  quote eval questions verbatim, so global BM25 ranked them above the real
+  tutorial. Fix = scope-aware retrieval: PROJECT_SCOPE_HINTS gate both the
+  boost AND company-pool participation; generic questions search public
+  docs only. /ask keeps legacy always-company behavior (its sweep passed);
+  /orchestrate is scope-aware.
+- Also fixed: code-route sources lost titles in shape mapping (explain
+  returns path/lines keys); image-markdown leak into prose (prompt rule).
+- Live matrix: erpnext schema + honest-zero count + code walkthrough with
+  line spans + rag generic/scoped split + misroute guard all PASS; versions
+  live in every response.

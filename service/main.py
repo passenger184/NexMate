@@ -29,6 +29,8 @@ from tools import files
 from tools import search as search_tool
 from tools.pathsafe import PathOutsideRootError
 
+import orchestrator
+
 NO_ANSWER = "I don't have a confident answer for this in the knowledge base."
 
 
@@ -166,6 +168,33 @@ class ErpnextListRequest(BaseModel):
     fields: list[str] | None = None
     limit: int = Field(config.ERPNEXT_DEFAULT_LIST_LIMIT, ge=1, le=100)
     order_by: str | None = Field(None, max_length=140)
+
+
+class OrchestrateRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=2000)
+    session_id: str | None = Field(
+        None, pattern=r"[A-Za-z0-9_-]{1,64}")
+
+
+class OrchestrateSource(BaseModel):
+    title: str
+    section: str
+    url_or_path: str
+    source_type: str | None = None
+    line_start: int | None = None
+    line_end: int | None = None
+
+
+class OrchestrateResponse(BaseModel):
+    answer: str
+    sources: list[OrchestrateSource]
+    confidence: Literal["high", "low", "no_match"]
+    route: Literal["erpnext", "code", "rag"]
+    route_how: Literal["heuristic", "classifier", "default"]
+    version_info: dict
+    session_id: str | None = None
+    turn_count: int | None = None
+    condensed_question: str | None = None
 
 
 @asynccontextmanager
@@ -433,3 +462,68 @@ def tools_erpnext_list(req: ErpnextListRequest) -> dict:
     except (erpnext_tool.ErpnextUnavailable,
             erpnext_tool.ErpnextApiError) as exc:
         raise _erpnext_http_error(exc) from exc
+
+
+@app.post("/orchestrate", response_model=OrchestrateResponse)
+def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
+    """Phase 6: single entry point routing between RAG, code agent, and
+    the live ERPNext tool; injects live instance versions into prompts.
+
+    Sessions behave like /ask (condense-then-retrieve on follow-ups);
+    routing happens on the CONDENSED question when a session is active.
+    """
+    history: list[dict[str, str]] = []
+    if req.session_id:
+        try:
+            history = session_store.load_history(req.session_id)
+        except session_store.InvalidSessionId as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    search_question = req.question
+    condensed: str | None = None
+    if history:
+        candidate = generator.condense_followup(history, req.question)
+        if candidate:
+            condensed = candidate
+            search_question = candidate
+
+    result = orchestrator.handle_question(
+        search_question, req.session_id, history)
+
+    turn_count: int | None = None
+    if req.session_id:
+        try:
+            n1 = session_store.append_turn(req.session_id, "user",
+                                           req.question)
+            n2 = session_store.append_turn(req.session_id, "assistant",
+                                           result["answer"])
+            turn_count = min(n1, n2)
+        except (session_store.InvalidSessionId, RuntimeError) as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    sources = []
+    for s in result.get("sources", []):
+        s = dict(s)
+        if "source_type" not in s and "url_or_path" in s:
+            # RAG chunks carry source_type at top level of the chunk dict
+            pass
+        sources.append(OrchestrateSource(**{
+            "title": s.get("title", ""),
+            "section": str(s.get("section", "")),
+            "url_or_path": s.get("url_or_path", ""),
+            "source_type": s.get("source_type"),
+            "line_start": s.get("line_start"),
+            "line_end": s.get("line_end"),
+        }))
+
+    return OrchestrateResponse(
+        answer=result["answer"],
+        sources=sources,
+        confidence=result["confidence"],
+        route=result["route"],
+        route_how=result["route_how"],
+        version_info=orchestrator.get_instance_versions(),
+        session_id=req.session_id,
+        turn_count=turn_count,
+        condensed_question=condensed,
+    )

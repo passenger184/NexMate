@@ -6,6 +6,13 @@ part of completing meaningful units of work — not just at phase end.
 ## [Unreleased]
 
 ### Added
+- Phase 6 Orchestrator: `POST /orchestrate` routes between RAG, the code
+  agent, and the live ERPNext tool (deterministic hints -> LLM classifier
+  -> rag default); live instance versions (Frappe 16.31.0 / ERPNext
+  16.32.3) cached read-only and injected into prompts for version
+  authority; ERPNext branch extracts strict-JSON requests and answers
+  only from real payloads; scope-aware retrieval keeps generic how-tos on
+  public docs while project questions keep the boosted company pool.
 - Phase 5 Read-only ERPNext API tool: `tools/erpnext.py` (GET-only by
   construction, percent-encoded path segments, capped payloads, loud
   timeouts) + `POST /tools/erpnext/schema|document|list` endpoints;

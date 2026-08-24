@@ -48,7 +48,9 @@ confidently, reply exactly: "I don't have a confident answer for this in \
 the knowledge base." Do not guess. If they cover the question only \
 partially, answer the parts they DO cover and briefly note what is \
 missing instead of declining outright.
-5. Prefer numbered steps over prose. Keep any code from the passages intact.
+5. Prefer numbered steps over prose. Keep any code from the passages \
+intact. Never output image markdown (![...](...)) — describe the step in \
+words instead.
 6. The passages come from current-version official documentation; do not \
 claim version-specific behavior the passages don't state. Passages labeled \
 "project code" or "project docs" describe THIS repository itself (its own \
@@ -168,12 +170,15 @@ def generate_answer(
     question: str,
     chunks: list[dict[str, Any]],
     history: list[dict[str, str]] | None = None,
+    extra_system: str = "",
 ) -> str:
     """Generate an answer grounded in the retrieved chunks.
 
     `history` carries prior turns of the same session (Phase 4 session
     continuity) and is inserted before the current question; grounding
     rules still apply to the ANSWER only — retrieval is per-turn.
+    `extra_system` appends caller-side rules to the system prompt (used by
+    the Phase 6 orchestrator to inject live instance-version authority).
 
     Raises on any provider failure — fail loud, never fall back to
     answering without context.
@@ -187,7 +192,7 @@ def generate_answer(
         for i, c in enumerate(chunks)
     )
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": SYSTEM_PROMPT}
+        {"role": "system", "content": SYSTEM_PROMPT + extra_system}
     ]
     for turn in history or []:
         role = "user" if turn["role"] == "user" else "assistant"
