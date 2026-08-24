@@ -1,7 +1,8 @@
 # ROADMAP.md — Phase Sequence
 
-**Current phase: Phase 1.** See `docs/PHASE_1_SPEC.md` for the detailed,
-actionable spec. Do not start a later phase until the current one meets its
+**Current phase: Phase 2.** See `docs/PHASE_2_SPEC.md` for the detailed,
+actionable spec (and `SECURITY.md`'s live-code-agent guardrails before any
+code). Do not start a later phase until the current one meets its
 Definition of Done and `progress/CURRENT.md` is updated to reflect it.
 
 **Scope note:** this is a single-project system for now. Multi-project/
@@ -11,7 +12,7 @@ explicitly reopens it.
 
 | Phase | Name | Delivers | Status |
 |---|---|---|---|
-| 1 | Pure RAG, Developer mode | Working RAG over public ERPNext/Frappe v16 docs, embedded sidebar UI, source citations | **Reported done by build agent — unverified.** Known open issue: confidence-gating bug (low-confidence answers still generate instead of declining). RAGAS + sidebar unverified. Fix before proceeding. |
+| 1 | Pure RAG, Developer mode | Working RAG over public ERPNext/Frappe v16 docs, embedded sidebar UI, source citations | **Functionally complete (user-accepted 2026-08-24).** All eval questions pass with citations; negatives decline. Consciously deferred: real-bench sidebar install, RAGAS re-score post-hybrid-retrieval. |
 | 2 | Live code read/edit agent | Read/search/explain (always-on) + confirmed, git-checkpointed file edits, scoped to this project's root | Not started — **next** |
 | 3 | Company knowledge | This project's custom app source + internal docs/procedures added to the index as a tagged corpus | Not started |
 | 4 | Project memory | Session continuity + resolved-issue corpus fed by Phase 2's commits | Not started |

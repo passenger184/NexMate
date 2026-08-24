@@ -35,22 +35,25 @@ this once":
   editing and data editing are different risk profiles and must stay
   architecturally separate — not the same tool with different arguments.
 
-## Current phase (RAG over public docs only)
+## Current phase constraints (updated as phases advance — Phase 2 active)
 
-- No credentials, API keys, or company-internal data are needed or used —
-  the corpus is public documentation only. If any task seems to require a
-  secret or company-internal data, stop; that's a later-phase concern
-  (Phase 3+), not this one.
-- The vector DB and embeddings run locally regardless of generation
-  provider choice. Generation itself is user-configurable (see
-  `ARCHITECTURE.md`'s "Generation provider config") — if `GENERATION_PROVIDER`
-  is set to a cloud service (Anthropic/OpenAI/etc.), retrieved document
-  content IS sent to that provider as part of the prompt. This is fine and
-  expected for Phase 1 (public docs only). Once Phase 2/3 introduce company
-  code and internal documents into retrieval, re-confirm with the user
-  before leaving a cloud `GENERATION_PROVIDER` active — that's the point at
-  which "content sent to a third party" starts to include proprietary
-  material, not just public ERPNext docs.
+- **Phase 2 (live code read/edit agent) is now building.** The Tier-1
+  read/search/explain tools operate on this project's real source code and
+  are always-on; the Tier-2 edit flow follows the git-gated rules at the
+  top of this file exactly. The tool never touches live ERPNext data —
+  code editing stays architecturally separate from data editing (Phase 7).
+- No credentials, API keys, or company-internal *documents* are needed for
+  the RAG corpus (public documentation only). Company source code enters
+  the picture in Phase 2's tools (reads) and Phase 3 (retrieval) — reads
+  stay local; nothing about them is sent anywhere until a generation call,
+  which is governed by the provider rule below.
+- Generation is user-configurable (see `ARCHITECTURE.md`'s "Generation
+  provider config"). While the corpus is public docs only, a cloud
+  `GENERATION_PROVIDER` is acceptable. Once Phase 3 puts company code /
+  internal documents into retrieval prompts, re-confirm with the user
+  before leaving a cloud `GENERATION_PROVIDER` active — that is the point
+  at which "content sent to a third party" starts to include proprietary
+  material.
 - The FastAPI service should bind to localhost only during development, not
   `0.0.0.0`, unless explicitly required for the Frappe app to reach it
   across a network boundary — and if so, document the exposure.

@@ -5,6 +5,7 @@ or in `.env` — never as magic numbers elsewhere in the codebase.
 """
 
 from pathlib import Path
+import os
 
 from dotenv import load_dotenv
 
@@ -17,6 +18,35 @@ ROOT_DIR = Path(__file__).resolve().parent
 DATA_DIR = ROOT_DIR / "data"
 RAW_DOCS_DIR = DATA_DIR / "raw_docs"       # crawled markdown, cached locally
 CHROMA_DIR = DATA_DIR / "chroma_db"        # persisted vector store (gitignored)
+
+# Phase 2 code tools: the single directory tree every file operation is
+# scoped to (SECURITY.md "Project-root scoping"). Configurable so the tool
+# can be pointed at a real project checkout; defaults to this repo. One
+# project, one root — no per-request roots, no workspace registry
+# (ARCHITECTURE.md "Scope: single project for now").
+_env_root = os.environ.get("PROJECT_ROOT")
+PROJECT_ROOT = Path(_env_root).resolve() if _env_root else ROOT_DIR
+
+# Upper bound for a single read_file response: protects the context window
+# and the service from accidentally reading multi-MB artifacts. Reading
+# something bigger should be a conscious decision (raise the config), not
+# an accident.
+MAX_READ_FILE_BYTES = int(os.environ.get("MAX_READ_FILE_BYTES", "1_000_000"))
+
+# --- Tier-1 code search (Phase 2) ------------------------------------------
+MAX_SEARCH_RESULTS = int(os.environ.get("MAX_SEARCH_RESULTS", "50"))
+MATCH_LINE_MAX_CHARS = 240        # long lines are clipped, never wrapped
+SEARCH_HARD_MATCH_CAP = 5000      # stop scanning beyond this many hits
+
+# --- Tier-1 explain (Phase 2) ------------------------------------------------
+EXPLAIN_MAX_SEARCH_TERMS = 5      # derived from the problem description
+EXPLAIN_MAX_FILES = 4             # files whose excerpts reach the generator
+EXPLAIN_MAX_EXCERPT_CHARS = 1600  # per-file excerpt ceiling
+EXPLAIN_WINDOW_LINES = 14         # context lines around a hit when excerpting
+
+# --- Tier-2 edit flow (Phase 2) ----------------------------------------------
+# Proposals expire: a stale diff applied days later is how mistakes happen.
+EDIT_PROPOSAL_TTL_MINUTES = int(os.environ.get("EDIT_PROPOSAL_TTL_MINUTES", "15"))
 
 # --- Doc corpus ----------------------------------------------------------
 SITEMAP_URL = "https://docs.frappe.io/sitemap.xml"

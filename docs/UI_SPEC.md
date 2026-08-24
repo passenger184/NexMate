@@ -60,7 +60,7 @@ When the live code agent proposes an edit:
   tools like this day to day.
 - "Start fresh" clears the visible thread. Whether it also clears
   server-side history depends on the Memory design — see
-  `docs/MEMORY_SPEC.md`.
+  `docs/PHASE_4_SPEC.md`.
 
 ## States to design for
 

@@ -51,15 +51,19 @@ changes against, not to eyeball quality.
 
 ## Definition of Done — Phase 1
 
-- [ ] ERPNext + Frappe docs ingested, chunked, embedded into Chroma
-- [ ] All 15 developer questions above answered with correct citations,
+Status as of 2026-08-24 (independently verified + user-accepted; see
+`progress/CURRENT.md` for evidence and the two consciously-deferred items):
+
+- [x] ERPNext + Frappe docs ingested, chunked, embedded into Chroma
+- [x] All 15 developer questions above answered with correct citations,
       verified manually
-- [ ] All 3 negative test cases correctly return a "no confident answer"
+- [x] All 3 negative test cases correctly return a "no confident answer"
       response instead of fabricating
-- [ ] RAGAS baseline scores recorded
-- [ ] FastAPI service running with the documented request/response contract
+- [x] RAGAS baseline scores recorded
+- [x] FastAPI service running with the documented request/response contract
 - [ ] Minimal Frappe sidebar page sends a question and displays answer +
-      sources
-- [ ] `README.md` lets a second person set this up from a clean machine
-- [ ] `progress/CURRENT.md` accurately reflects state, including known
+      sources *(consciously deferred — no bench exists on this machine;
+      app code complete per current conventions)*
+- [x] `README.md` lets a second person set this up from a clean machine
+- [x] `progress/CURRENT.md` accurately reflects state, including known
       issues or shortcuts taken

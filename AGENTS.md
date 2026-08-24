@@ -17,19 +17,20 @@ first, it tells you what everything else is for and what NOT to do.
    only — not current scope, do not build from it.
 5. `docs/UI_SPEC.md` — standing UI reference, applies from Phase 1 onward,
    not gated to one phase
-5. `SECURITY.md` — guardrails, always in effect (includes hard rules for
+6. `SECURITY.md` — guardrails, always in effect (includes hard rules for
    the live code edit tool in Phase 2)
-6. `EVALUATION.md` — how "done" is verified
-7. `progress/CURRENT.md` — what's already been built, resume from here
+7. `EVALUATION.md` — how "done" is verified
+8. `progress/CURRENT.md` — what's already been built, resume from here
 
 ## The one rule that matters most
 
-**Build only what the current phase in `ROADMAP.md` / `docs/PHASE_1_SPEC.md`
-describes.** `ARCHITECTURE.md` shows the full destination — a multi-tool,
-multi-agent, dual-mode system. That is not this session's task. If you find
-yourself building a router, an orchestrator, live ERPNext API calls, code
-search, or a second user mode before the roadmap says to — stop. Report
-what you were about to do and why, and confirm before proceeding.
+**Build only what the current phase in `ROADMAP.md` (and its spec doc,
+e.g. `docs/PHASE_2_SPEC.md`) describes.** `ARCHITECTURE.md` shows the full
+destination — a multi-tool, multi-agent, dual-mode system. That is not this
+session's task. If you find yourself building a router, an orchestrator,
+live ERPNext API calls, or a second user mode before the roadmap says to —
+stop. Report what you were about to do and why, and confirm before
+proceeding.
 
 ## Model downloads — confirm before pulling an LLM
 
@@ -67,7 +68,7 @@ total:
   meaningful units of work, not just at the end of a session — assume the
   session may be interrupted at any point.
 - Log every consequential technical choice (library swap, chunking
-  strategy, model choice) in `decisions/` using the ADR format described
+  strategy, model choice) in `DECISIONS.md` using the ADR format described
   there — future sessions need to know why, not just what.
 - When a requirement is ambiguous but low-stakes, pick a sensible default,
   document the assumption in `progress/JOURNAL.md`, and continue. When it's
@@ -77,6 +78,7 @@ total:
 
 ## Definition of Done (current phase)
 
-See the Definition of Done checklist in `docs/PHASE_1_SPEC.md`. Do not
-report a phase complete until every item is verified true and logged in
+See the Definition of Done checklist in the current phase's spec doc (per
+`ROADMAP.md`'s phase pointer — `docs/PHASE_2_SPEC.md` as of 2026-08-24). Do
+not report a phase complete until every item is verified true and logged in
 `progress/CURRENT.md`.

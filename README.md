@@ -105,6 +105,42 @@ Response contract:
 `no_match` means retrieval found nothing relevant: the answer is a fixed
 honest refusal and `sources` is empty — the UI renders this distinctly.
 
+### Code tools (Phase 2)
+
+```bash
+curl -s http://127.0.0.1:8000/tools/read_file \
+  -H 'Content-Type: application/json' \
+  -d '{"path": "tools/pathsafe.py"}'
+```
+
+Tier-1 read tool: always-on, no confirmation. Every path is resolved
+(symlinks included) against `PROJECT_ROOT` (`config.py`, overridable via
+`.env`) and anything resolving outside it is rejected with HTTP 400 and an
+explanation — traversal, absolute escapes, and symlinked escapes all fail
+loudly. Oversized reads (> `MAX_READ_FILE_BYTES`, default 1MB) are refused,
+not truncated.
+
+Search and explain round out Tier 1:
+
+```bash
+# grep-equivalent over project files (gitignore-aware via git ls-files):
+curl -s http://127.0.0.1:8000/tools/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "resolve_in_project", "ignore_case": false}'
+
+# locate code behind an error and explain the cause, grounded in it:
+curl -s http://127.0.0.1:8000/tools/explain \
+  -H 'Content-Type: application/json' \
+  -d '{"description": "KeyError: path when parsing the /tools/read_file response"}'
+```
+
+`search` treats the query as a regex (falls back to literal when it
+doesn't compile) and reports whether results were truncated. `explain`
+derives search terms from the description, ranks files by specificity-
+weighted matches, feeds excerpts to the generation model under the same
+grounded-only rules as `/ask`, and cites `path` + line ranges; it declines
+honestly when no matching code exists.
+
 ## Install the Desk sidebar (Frappe app)
 
 On the machine running your ERPNext bench:
@@ -112,7 +148,7 @@ On the machine running your ERPNext bench:
 ```bash
 # copy this repo's frappe_app/ directory into the bench as an app
 cp -r /path/to/repo/frappe_app $BENCH/apps/erpnext_ai_copilot
-cd $BENCH/apps/erpnot_ai_copilot && pip install -e .
+cd $BENCH/apps/erpnext_ai_copilot && pip install -e .
 
 bench build --app erpnext_ai_copilot
 bench --site yoursite.local install-app erpnext_ai_copilot
@@ -161,13 +197,19 @@ answers — treat scores as comparative baselines, not absolutes.
 ## Repository layout
 
 ```
-config.py                     # all tunables (paths, k, thresholds)
+config.py                     # all tunables (paths, k, thresholds, PROJECT_ROOT)
 ingestion/scrape_or_load_docs.py   # sitemap crawl -> data/raw_docs/
 ingestion/chunk_and_embed.py       # heading chunks -> Chroma (cosine)
-rag/retriever.py              # top-k retrieval, best-chunk-per-doc, confidence gate
+rag/retriever.py              # hybrid BM25+vector retrieval, confidence gate
+rag/keyword_index.py          # in-house Okapi BM25 over the Chroma corpus
 rag/generator.py              # THE one litellm call site (provider-agnostic)
-service/main.py               # FastAPI: POST /ask, GET /health
-evaluation/                   # reference answers + RAGAS baseline runner
+service/main.py               # FastAPI: /ask, /tools/read_file|search|explain, /health
+tools/pathsafe.py             # project-root path safety (the security primitive)
+tools/files.py                # Tier-1 read_file tool
+tools/search.py               # Tier-1 gitignore-aware code search
+tools/explain.py              # Tier-1 locate + grounded explanation
+evaluation/                   # reference answers + RAGAS runner + retrieval probe
+tests/                        # stdlib-unittest suite (python -m unittest discover -s tests)
 frappe_app/                   # minimal Frappe app: Desk sidebar UI
 progress/CURRENT.md           # what works, what doesn't — read after setup
 DECISIONS.md                  # ADRs explaining every consequential choice

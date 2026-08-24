@@ -91,9 +91,10 @@ reinstall of Ollama itself is ever needed to change or add models.
 
 ## Project structure
 
-See `docs/PHASE_1_SPEC.md`'s "Deliverable structure" for the current-phase
-layout. Do not add directories/services beyond what the current phase
-requires (e.g., no `orchestrator/` folder until Phase 5).
+Each phase's spec doc defines its own deliverable layout (Phase 1:
+`docs/PHASE_1_SPEC.md`; Phase 2 adds `tools/` + `tests/`). Do not add
+directories/services beyond what the current phase requires (e.g., no
+`orchestrator/` folder until Phase 5).
 
 ## Running the test set
 

@@ -1,8 +1,22 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 4, continued: hybrid keyword+vector retrieval implemented and verified — all 2026-08-24 regressions resolved; full sweep 15/15 answered + cited, 3/3 negatives exact no_match)
-**Current phase:** Phase 1 — Pure RAG, Developer mode (see `docs/PHASE_1_SPEC.md`)
-**Current task:** Phase 1 build re-complete after the hybrid-retrieval fix. Remaining before calling it done in the wild: install/verify the Frappe app on a real bench (impossible from this box), optionally re-score RAGAS post-change.
+**Last updated:** 2026-08-24 (session 6, continued: Phase 2 Task 2 built and verified — Tier-1 search + explain live; Tier 1 complete)
+**Current phase:** Phase 2 — Live code read/edit agent (see `docs/PHASE_2_SPEC.md`; `SECURITY.md` guardrails enforced in code from day one)
+**Current task:** Phase 2 Tasks 1–2 (all of Tier 1) complete. Next: Task 3 — the Tier-2 edit flow.
+
+## Phase 1 closure note (2026-08-24, user decision)
+
+Phase 1 is accepted as functionally complete. Two verification items were
+consciously deferred, NOT silently skipped:
+- **Real-bench sidebar install** — impossible on this box; app code complete
+  and untested against a live bench.
+- **RAGAS re-score post-hybrid-retrieval** — generation phase DID complete
+  against the new pipeline (`data/ragas_samples_2026-08-24T11:32:30Z.json`,
+  15/15 answered at high confidence); the scoring phase was aborted mid-run
+  by user order. A future session can score that file directly with
+  `.venv-eval/bin/python -m evaluation.ragas_eval score <file>` (~40 min)
+  without regenerating. The 2026-08-23 baseline below remains the recorded
+  baseline.
 
 ## RAGAS baseline (EVALUATION.md requirement)
 
@@ -146,7 +160,47 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
 
 ## Next step
 
-Install `frappe_app/` on the real bench and confirm the sidebar works
-against the live service (README "Install the Desk sidebar"). Optionally
-re-run the RAGAS scoring phase against fresh samples to quantify the
-hybrid-retrieval gain on context_precision.
+**Phase 2 Task 3: the Tier-2 edit flow.**
+1. Git-clean gate: refuse any edit while `git status` is dirty (tell the
+   user to commit/stash — never auto-stash).
+2. Propose-as-diff: show the exact unified diff before applying.
+3. Explicit per-edit confirmation, then apply + atomic commit with a clear
+   message; never batch edits into one unreviewed commit.
+4. Refuse: paths outside PROJECT_ROOT, untracked files, git-ignored files
+   (.env, caches) — say so and ask how to proceed instead of skipping.
+5. Verify per spec DoD (≥3 real end-to-end edits, each isolated in its own
+   commit).
+
+## Phase 2 progress
+
+- **Task 1 DONE (2026-08-24).** `PROJECT_ROOT` config (config.py +
+  .env.example, defaults to repo root); `tools/pathsafe.py`
+  `resolve_in_project()` — resolve-then-verify (symlinks collapsed before
+  containment check; in-root symlinks allowed, escapes rejected with a
+  message naming both paths); `tools/files.py` `read_project_file()` —
+  regular-files only, 1MB cap (`MAX_READ_FILE_BYTES`), strict UTF-8;
+  `POST /tools/read_file` on the service (400 outside-root/400 non-file or
+  binary/404 missing/413 oversized). Verified: 15/15 stdlib-unittest cases
+  (`python -m unittest discover -s tests`) + live curl checks — real file
+  reads back, `../../../etc/passwd`, `/etc/passwd`, and a symlink-out
+  escape all rejected loudly; no silent redirects anywhere.
+- **Task 2 DONE (2026-08-24).** `tools/search.py` — grep-equivalent over
+  `git ls-files --cached --others --exclude-standard` (gitignore-aware,
+  includes fresh untracked files), regex with literal fallback,
+  case-sensitive default, results capped (`MAX_SEARCH_RESULTS`) with honest
+  truncation flag + skipped-binary/large counters, every file re-scoped
+  through pathsafe before reading. `tools/explain.py` — derives search
+  terms from a problem description (quoted phrases > identifier-style
+  tokens > noise-filtered words), ranks files by specificity-weighted
+  capped match counts (snake_case/CamelCase ×3 so chatty files full of
+  generic words can't drown the real one), excerpts windows around hits,
+  ONE grounded-only LLM call reusing `rag.generator._complete` (the single
+  litellm site) + its verbatim-identifier grounding net, cites
+  `path` lines a-b, declines honestly on zero hits without spending an LLM
+  call. Endpoints `POST /tools/search`, `POST /tools/explain`.
+  Verified: 30/30 unittest cases; live — search finds 18 hits across 65
+  files for `resolve_in_project` with `.env` (gitignored) excluded;
+  explain correctly locates `service/main.py:194-218` for a KeyError-
+  parsing-the-read_file-response description and walks the actual call
+  chain grounded in excerpt text (first iteration ranked ingestion scripts
+  top — fixed by the specificity weighting before sign-off).

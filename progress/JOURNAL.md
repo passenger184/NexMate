@@ -165,3 +165,79 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   decline') and letter-of-contract both satisfied.
 - Not done this session: RAGAS re-score post-retrieval-change (baseline
   stands; harness ready), real-bench sidebar install (still impossible here).
+
+## [2026-08-24] — session 5: Phase 1 closed, Phase 2 opened
+
+- RAGAS re-score attempt: generate phase completed against the hybrid
+  pipeline (data/ragas_samples_2026-08-24T11:32:30Z.json — 15/15 rows,
+  all confidence=high, 8 contexts each; harness bug fixed first:
+  ragas_eval.py still called classify_confidence with the pre-hybrid
+  signature). Scoring phase (~40 min) was launched detached and then
+  ABORTED mid-run by user order: Phase 1 is functionally complete enough;
+  drop bench install + re-score. Samples file kept so a future session
+  can score it directly without regenerating (command in CURRENT.md).
+- Researcher-subagent invocation for the runbook failed twice with
+  provider network errors; fell back to direct read-through of the
+  evaluation harness instead (same outcome, no code risk encountered).
+- ROADMAP.md phase pointer moved to Phase 2 with an honest Phase 1 status
+  line (functionally complete, user-accepted; deferred items listed).
+- Phase 2 Task 1 outlined in CURRENT.md: PROJECT_ROOT config + canonical
+  symlink-aware path-safety helper + Tier-1 read_file + traversal-rejection
+  verification, per docs/PHASE_2_SPEC.md and SECURITY.md guardrails.
+
+## [2026-08-24] — session 6: docs audit + Phase 2 Task 1
+
+- Full doc-set audit at user request (all 15 .md files + opencode.json).
+  Fixes applied: AGENTS.md duplicate "5" in read order, stale PHASE_1_SPEC
+  references made phase-agnostic, ADR location corrected to DECISIONS.md
+  (the `decisions/` dir it named was empty); EVALUATION.md Phase-1 DoD
+  boxes ticked to match tester-verified reality; UI_SPEC.md pointed from
+  nonexistent MEMORY_SPEC.md to PHASE_4_SPEC.md; README bench-install typo
+  (erpnot->erpnext); SECURITY.md current-phase section refreshed for the
+  Phase 2 transition; CHANGELOG.md backfilled with real history;
+  opencode.json instructions now include CHANGELOG.md (restart needed to
+  take effect). No guardrail-weakening changes anywhere.
+- Phase 2 Task 1 built and verified. Design decision logged here rather
+  than as an ADR (implementation detail, not a stack choice): path safety
+  is resolve-THEN-verify — Path.resolve() collapses symlinks/'..' before
+  containment is checked against resolved PROJECT_ROOT — so a symlink
+  inside the root pointing outside is rejected on its DESTINATION.
+  Rejection raises with both the requested and resolved paths (loud, no
+  sanitization/redirect), per SECURITY.md wording. In-root symlinks are
+  allowed (they're legitimate project structure).
+- tools/files.py caps reads at MAX_READ_FILE_BYTES (1MB default) instead
+  of truncating silently — truncation would corrupt any code explanation
+  built on it; raising the cap is a deliberate act. Strict UTF-8 decode:
+  binary content refuses loudly rather than returning mojibake.
+- Verification: 15/15 stdlib-unittest cases green; live curl checks via
+  restarted service — real file OK, ../..-traversal / /etc/passwd /
+  symlink-out all HTTP 400 with explanatory detail, missing file 404,
+  oversized/binary covered by unit tests. Spec DoD item "path-traversal
+  attempt verified rejected, not silently redirected": done.
+
+## [2026-08-24] — session 6, continued: Phase 2 Task 2 (Tier-1 search + explain)
+
+- search: git ls-files --cached --others --exclude-standard as the file
+  universe (gitignore-aware AND includes new untracked files — the two
+  naive alternatives each fail one way). Regex-first with silent literal
+  fallback (declared in the response), grep-style case-sensitive default.
+  Every listed file re-scoped through resolve_in_project before reading —
+  the gitignore filter is a quality feature; pathsafe remains THE
+  boundary. Honest counters for skipped binary/large and truncation.
+- explain: term extraction (quoted > identifier-length-ranked > noise-
+  filtered), then scoring = position-weight x specificity(x3 for
+  snake/CamelCase) x per-term match count CAPPED AT 5. The cap matters:
+  first live iteration let 'response/client/parse' hit-storms in ingestion
+  scripts outrank service/main.py for a read_file KeyError description;
+  after the fix service/main.py:194-218 ranks #1 and the walkthrough cites
+  only real identifiers. Excerpts window around hits; sources report the
+  true excerpt span (min/max-of-hits spans were misleadingly wide).
+- LLM access via rag.generator._complete + _ungrounded_identifiers reuse —
+  still exactly one litellm call site in the codebase; explain's prompt
+  requires `path` + plain line-number citations so the backtick grounding
+  net stays compatible.
+- Zero-hit or zero-term descriptions decline WITHOUT an LLM call (asserted
+  by tests), matching the /ask no_match philosophy for Tier 1.
+- Verification: 30/30 unittest (incl. decoy-file regression + excerpt-span
+  tests); live search 18 hits/65 files with .env excluded; live explain
+  grounded walkthrough of the read_file flow.

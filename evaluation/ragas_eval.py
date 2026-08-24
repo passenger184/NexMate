@@ -65,7 +65,7 @@ def build_samples() -> tuple[list[dict], list[dict]]:
     audit: list[dict] = []
     for i, q in enumerate(QUESTIONS):
         chunks = retriever.retrieve(q)
-        confidence = retriever.classify_confidence([c["score"] for c in chunks])
+        confidence = retriever.classify_confidence(chunks, q)
         # Mirror service/main.py gating: only "high" reaches the generator;
         # low/no_match are deterministic refusals.
         answer = (
