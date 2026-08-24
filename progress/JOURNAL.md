@@ -323,3 +323,27 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
 - Dirty-tree gate refused my own first README edit attempt because Phase 4
   implementation was uncommitted — correct behavior; committed prerequisite
   d21c9ed first, exactly as designed.
+
+## [2026-08-24] — session 9: Phase 5 (read-only ERPNext API tool)
+
+- User supplied live instance (localhost:8081) + API credentials; stored
+  ONLY in .env (gitignored, verified zero diff). Connectivity verified
+  BEFORE any code: ping -> pong 200; DocType/Customer read confirmed.
+- Client design per SECURITY.md read-only rule: the module exposes only
+  GET-shaped helpers — no post/put/delete exists to misuse (test asserts
+  this). Segments percent-encoded with safe=""; traversal input becomes
+  an escaped literal segment instead of a path. Auth header built per
+  request from env; error bodies truncated to 300 chars and never include
+  auth material. Response cap 2MB; timeout loud as ErpnextUnavailable.
+- Live bug caught before sign-off: get_doctype_schema omitted the
+  "DocType/" prefix so it silently queried /api/resource/{doctype} (the
+  document LIST) and returned data=[] — looked like "no schema" instead
+  of an error. Fixed by prefixing; lesson: empty-but-200 responses deserve
+  suspicion when shape changes.
+- Instance reality check: fresh dev instance — Customer/Item/Sales Order
+  hold zero documents; User(1)/Role(3+)/Company(1) have data. Verified all
+  three ops on what EXISTS: schema(Customer, 87 fields), list+filter
+  (Roles disabled=0 -> 10), document(User passengerlunar5@gmail.com, full
+  roles table). Administrator doc -> clean 403 passthrough (Frappe-
+  enforced), which doubles as the permission-behavior check.
+- 59/59 tests green. Endpoints: /tools/erpnext/schema|document|list.

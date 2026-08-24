@@ -56,6 +56,12 @@ SESSION_MAX_TURNS = 6        # exchanges (user+assistant) included in prompt
 SESSION_MAX_CHARS = 6000     # hard char ceiling on serialized history
 SESSION_ID_PATTERN = r"[A-Za-z0-9_-]{1,64}"  # filename-safe by construction
 
+# --- ERPNext live API (Phase 5, read-only) -------------------------------------
+ERPNEXT_TIMEOUT_SECONDS = 20
+ERPNEXT_MAX_RESPONSE_BYTES = 2_000_000   # schema/doc payloads can be chunky
+ERPNEXT_DEFAULT_LIST_LIMIT = 20
+ERPNEXT_MAX_LIST_LIMIT = 100
+
 # --- Doc corpus ----------------------------------------------------------
 SITEMAP_URL = "https://docs.frappe.io/sitemap.xml"
 

@@ -6,6 +6,12 @@ part of completing meaningful units of work — not just at phase end.
 ## [Unreleased]
 
 ### Added
+- Phase 5 Read-only ERPNext API tool: `tools/erpnext.py` (GET-only by
+  construction, percent-encoded path segments, capped payloads, loud
+  timeouts) + `POST /tools/erpnext/schema|document|list` endpoints;
+  credentials live only in `.env`. Verified against the live instance at
+  localhost:8081 (schema 87-field Customer, filtered Role list, full User
+  document; clean 403/404 passthrough).
 - Phase 4 Project Memory: optional `session_id` on `/ask` (server-side
   threads in `data/sessions/`, budgeted at read time), follow-up
   condensation against conversation history before retrieval, `POST

@@ -1,19 +1,12 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 8: Phase 4 — Project Memory — built and verified; session continuity + resolved-issue corpus live, DoD met)
-**Current phase:** Phase 4 — Project Memory (`docs/PHASE_4_SPEC.md`) — functionally complete, awaiting user acceptance
-**Current task:** None in flight. Proposed next: Phase 5 — Read-only ERPNext API tool (`ROADMAP.md`), which needs a reachable ERPNext instance to build against.
+**Last updated:** 2026-08-24 (session 9: Phase 5 — Read-only ERPNext API tool — built and verified against the live instance at localhost:8081; DoD met)
+**Current phase:** Phase 5 — Read-only ERPNext API tool (ROADMAP.md; no dedicated spec doc) — functionally complete, awaiting user acceptance
+**Current task:** None in flight. Proposed next: Phase 6 — Orchestrator/router, which routes between RAG, code agent, and this new ERPNext tool.
 
-## Phase 2 closure note (2026-08-24)
+## Phase 4 closure note (2026-08-24)
 
-Phase 2 accepted via user instruction to proceed. All six DoD items in
-`docs/PHASE_2_SPEC.md` verified (see the Phase 2 progress section below);
-the only bench-dependent leftover is the sidebar's diff/approve UI
-(`docs/UI_SPEC.md`), same conscious-deferral pattern as Phase 1.
-
-## Phase 3 closure note (2026-08-24)
-
-Phase 3 accepted via user instruction to proceed; verification table and
+Phase 4 accepted via user instruction to proceed; verification table and
 DoD status below.
 
 ## Phase 3 — Company Knowledge: what changed
@@ -217,19 +210,43 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
 
 ## Next step
 
-**Phase 2 is functionally complete — every DoD item in
-`docs/PHASE_2_SPEC.md` verified (see Phase 2 progress below).**
-Remaining, bench-dependent only: the Frappe sidebar's diff/approve UI
-(`docs/UI_SPEC.md` "Diff / edit approval") can be written but not tested
-without a real bench — same conscious-deferral pattern as the Phase 1
-sidebar install.
+**Phase 5 is functionally complete** (see the Phase 5 section below).
+Upon user acceptance: start **Phase 6 — Orchestrator/router**
+(`ROADMAP.md`; no dedicated spec doc): route between the RAG engine, the
+code tools, and the ERPNext tool; enforce version-awareness.
+ARCHITECTURE.md's "AI Orchestrator" section now applies (2+ tools exist).
 
-Upon user acceptance: start **Phase 3 — Company Knowledge**
-(`docs/PHASE_3_SPEC.md`): ingest this project's custom app source +
-internal docs into the existing Chroma store under `our_code` /
-`company_doc` source-type tags. Note SECURITY.md's cloud-provider rule:
-before Phase 3 puts company material into retrieval prompts, re-confirm
-the `GENERATION_PROVIDER` choice with the user.
+## Phase 5 — Read-only ERPNext API tool: what changed
+
+- **`tools/erpnext.py`** - GET-only by construction (no post/put/delete
+  helper exists in the module; asserted by test). Credentials from .env
+  (ERPNEXT_BASE_URL/API_KEY/API_SECRET, gitignored), sent only as the
+  Authorization header, never logged or echoed in errors. Path segments
+  percent-encoded with safe="" so ../ and / cannot form URL paths.
+  Payloads capped (ERPNEXT_MAX_RESPONSE_BYTES=2MB); timeouts loud.
+- **Service endpoints**: POST /tools/erpnext/schema {doctype},
+  /document {doctype,name}, /list {doctype,filters?,fields?,limit?,
+  order_by?} (limit hard-capped at 100). Statuses mapped cleanly:
+  instance-down -> 503, upstream 403/404 passed through, oversized -> 413.
+- **Config**: ERPNEXT_TIMEOUT_SECONDS / _MAX_RESPONSE_BYTES /
+  _DEFAULT_LIST_LIMIT / _MAX_LIST_LIMIT.
+
+## Phase 5 verification (live instance http://localhost:8081)
+
+| Check | Result |
+|---|---|
+| Connectivity + auth | ping -> pong, HTTP 200 |
+| Schema | Customer: module Selling, naming_rule By-Naming-Series, 87 field rows |
+| List + filter | Roles disabled=0 -> exactly 10 expected roles; User list -> the instance's one real user |
+| Document by name | passengerlunar5@gmail.com -> full record incl. roles table |
+| Permission behavior | Administrator doc -> clean HTTP 403 passthrough (Frappe protects it) |
+| Error path | nonexistent DocType -> clean 404 with Frappe's message |
+| Empty-data honesty | Customer/Sales Order lists return count 0 (no records in instance) |
+| Tests | 59/59 unittest green (7 new client cases incl. GET-only-by-construction) |
+
+Bug found and fixed during live verification: schema lookup omitted the
+DocType/ path prefix, silently querying the document list instead -
+surfaced as data=[] and fixed before sign-off.
 
 ## Phase 4 — Project Memory: what changed
 

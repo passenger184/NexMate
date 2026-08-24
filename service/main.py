@@ -23,6 +23,7 @@ import config
 from rag import generator, retriever
 from service import session_store
 from tools import edit as edit_tool
+from tools import erpnext as erpnext_tool
 from tools import explain as explain_tool
 from tools import files
 from tools import search as search_tool
@@ -148,6 +149,23 @@ class EditApplyResponse(BaseModel):
     message: str
     diff: str
     memory: dict = {}
+
+
+class ErpnextSchemaRequest(BaseModel):
+    doctype: str = Field(min_length=1, max_length=140)
+
+
+class ErpnextDocumentRequest(BaseModel):
+    doctype: str = Field(min_length=1, max_length=140)
+    name: str = Field(min_length=1, max_length=140)
+
+
+class ErpnextListRequest(BaseModel):
+    doctype: str = Field(min_length=1, max_length=140)
+    filters: dict | None = None
+    fields: list[str] | None = None
+    limit: int = Field(config.ERPNEXT_DEFAULT_LIST_LIMIT, ge=1, le=100)
+    order_by: str | None = Field(None, max_length=140)
 
 
 @asynccontextmanager
@@ -371,3 +389,47 @@ def tools_apply_edit(req: ApplyEditRequest) -> EditApplyResponse:
     except edit_tool.EditRefusal as exc:
         raise _refuse_as_http(exc) from exc
     return EditApplyResponse(**result)
+
+
+def _erpnext_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, erpnext_tool.ErpnextUnavailable):
+        return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, erpnext_tool.ErpnextApiError) and exc.status != 413:
+        return HTTPException(status_code=exc.status,
+                             detail=f"ERPNext: {exc}")
+    if isinstance(exc, erpnext_tool.ErpnextApiError):
+        return HTTPException(status_code=413, detail=str(exc))
+    return HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/tools/erpnext/schema")
+def tools_erpnext_schema(req: ErpnextSchemaRequest) -> dict:
+    """Phase 5 read-only tool: live DocType schema (fields, perms, naming)."""
+    try:
+        return erpnext_tool.get_doctype_schema(req.doctype)
+    except (erpnext_tool.ErpnextUnavailable,
+            erpnext_tool.ErpnextApiError) as exc:
+        raise _erpnext_http_error(exc) from exc
+
+
+@app.post("/tools/erpnext/document")
+def tools_erpnext_document(req: ErpnextDocumentRequest) -> dict:
+    """Phase 5 read-only tool: one live document by exact name."""
+    try:
+        return erpnext_tool.get_document(req.doctype, req.name)
+    except (erpnext_tool.ErpnextUnavailable,
+            erpnext_tool.ErpnextApiError) as exc:
+        raise _erpnext_http_error(exc) from exc
+
+
+@app.post("/tools/erpnext/list")
+def tools_erpnext_list(req: ErpnextListRequest) -> dict:
+    """Phase 5 read-only tool: filtered document list (light fields)."""
+    try:
+        return erpnext_tool.list_documents(
+            req.doctype, filters=req.filters, fields=req.fields,
+            limit=req.limit, order_by=req.order_by,
+        )
+    except (erpnext_tool.ErpnextUnavailable,
+            erpnext_tool.ErpnextApiError) as exc:
+        raise _erpnext_http_error(exc) from exc

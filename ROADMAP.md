@@ -1,9 +1,9 @@
 # ROADMAP.md — Phase Sequence
 
-**Current phase: Phase 2.** See `docs/PHASE_2_SPEC.md` for the detailed,
-actionable spec (and `SECURITY.md`'s live-code-agent guardrails before any
-code). Do not start a later phase until the current one meets its
-Definition of Done and `progress/CURRENT.md` is updated to reflect it.
+**Current phase: Phase 5.** See `ROADMAP.md`'s phase table and
+`SECURITY.md`'s read-only rule for the live ERPNext tool. Do not start a
+later phase until the current one meets its Definition of Done and
+`progress/CURRENT.md` is updated to reflect it.
 
 **Scope note:** this is a single-project system for now. Multi-project/
 workspace support is a deferred future direction — see
@@ -13,10 +13,10 @@ explicitly reopens it.
 | Phase | Name | Delivers | Status |
 |---|---|---|---|
 | 1 | Pure RAG, Developer mode | Working RAG over public ERPNext/Frappe v16 docs, embedded sidebar UI, source citations | **Functionally complete (user-accepted 2026-08-24).** All eval questions pass with citations; negatives decline. Consciously deferred: real-bench sidebar install, RAGAS re-score post-hybrid-retrieval. |
-| 2 | Live code read/edit agent | Read/search/explain (always-on) + confirmed, git-checkpointed file edits, scoped to this project's root | Not started — **next** |
+| 2 | Live code read/edit agent | Read/search/explain (always-on) + confirmed, git-checkpointed file edits, scoped to this project's root | **Functionally complete (user-accepted 2026-08-24).** All six DoD items verified; bench-dependent sidebar diff/approve UI deferred |
 | 3 | Company knowledge | This project's custom app source + internal docs/procedures added to the index as a tagged corpus | **Functionally complete (user-accepted 2026-08-24).** P1–P6 + dual-source preference verified; index 7,410 public + 321 project chunks |
 | 4 | Project memory | Session continuity + resolved-issue corpus fed by Phase 2's commits | **Functionally complete (2026-08-24).** Continuity proven incl. second-order follow-up; 4 resolutions indexed (3 backfilled + 1 auto) |
-| 5 | Read-only ERPNext API tool | Live-instance lookups (schemas, field values, doc status) | Not started |
+| 5 | Read-only ERPNext API tool | Live-instance lookups (schemas, field values, doc status) | **Functionally complete (2026-08-24).** Schema/list(+filters)/document verified live at http://localhost:8081; GET-only client, clean 403/404 mapping |
 | 6 | Orchestrator/router | Routes between RAG, code agent, and ERPNext API tool; enforces version-awareness | Not started |
 | 7 | Employee/User mode | Restricted persona/prompt on the same orchestrator and knowledge base | Not started |
 | 8 | Write-capable ERPNext Agent | Guarded, multi-step actions against live ERPNext data — staging-only until proven safe | Not started |
