@@ -6,6 +6,11 @@ part of completing meaningful units of work — not just at phase end.
 ## [Unreleased]
 
 ### Added
+- Phase 8 Write-capable ERPNext Agent: `tools/erpnext_write.py` +
+  `POST /tools/erpnext_write/propose|apply` — flag-gated
+  (ERPNEXT_WRITE_ENABLED), Tier-2 confirm flow with exact previews,
+  pre-flight schema validation, create/update only (no delete), and an
+  append-only audit log. Verified live on staging (localhost:8081).
 - Phase 7 Employee/User mode: `POST /orchestrate` accepts
   mode=developer|employee; employees get a plain-language desk-user
   persona over public docs only, the code agent and DocType-schema

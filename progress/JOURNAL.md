@@ -394,3 +394,24 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   denial, E3 schema denial with redirect, E4 live count "20 roles... [1]"
   (no filter -> total roles; earlier 10 was disabled=0 — consistent),
   developer control unchanged (87-field Customer answer).
+
+## [2026-08-24] — session 12: Phase 8 (Write-capable ERPNext Agent) — ROADMAP COMPLETE
+
+- Write capability lives in tools/erpnext_write.py, deliberately separate
+  from the GET-only read client. Master flag ERPNEXT_WRITE_ENABLED checked
+  at propose AND apply (proven live: 403 before enabling).
+- Tier-2 pattern reused for data writes: exact preview (method+URL+body),
+  one-shot TTL'd proposals, explicit confirmed=true.
+- Pre-flight schema validation refuses unknown fieldnames before any HTTP
+  call — live-proven with a typo'd fieldname (custmer_nme -> 400 listing
+  it). Frappe ignores unknown keys silently, so this guard catches what
+  the server would have swallowed.
+- DELETE does not exist anywhere in the write module (test-asserted);
+  multi-step actions are sequential individually-confirmed proposals.
+- Server-validation honesty proven: Frappe rejected group-type
+  customer_group and our error path surfaced its exact message; adapted by
+  querying valid leaf groups from the instance itself.
+- Audit trail verified: both live writes appended with env_label=staging,
+  reasons, payload keys; update confirmed by read-back through the read
+  tool ("Copilot Test Customer (renamed)").
+- Two test Customers remain on staging (clearly labeled); deletable via UI.

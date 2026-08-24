@@ -1,8 +1,13 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 11: Phase 7 — Employee/User mode — restricted persona live with least-privilege routes; DoD met)
-**Current phase:** Phase 7 — Employee/User mode (ROADMAP.md) — functionally complete, awaiting user acceptance
-**Current task:** None in flight. Proposed next: Phase 8 — Write-capable ERPNext Agent (LAST roadmap phase; staging-only per SECURITY.md).
+**Last updated:** 2026-08-24 (session 12: Phase 8 — Write-capable ERPNext Agent — built, gated, and verified live on staging; ROADMAP COMPLETE)
+**Current phase:** Roadmap complete (Phases 1–8 functionally done; Phase 8 accepted pending user sign-off)
+**Current task:** None in flight.
+
+## Phase 7 closure note (2026-08-24)
+
+Phase 7 accepted via user instruction to proceed (commit c7b8267); live
+matrix below.
 
 ## Phase 6 closure note (2026-08-24)
 
@@ -220,11 +225,51 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
 
 ## Next step
 
-**Phase 7 is functionally complete** (see below). Upon user acceptance:
-start **Phase 8 — Write-capable ERPNext Agent**, the LAST roadmap phase.
-SECURITY.md hard rules apply before any code: staging-only until
-explicitly approved for production, every write needs a confirmation
-step, no silent multi-step actions against live company data.
+**ROADMAP COMPLETE — all eight phases functionally done.** Remaining,
+deliberately outside the build loop:
+- Production writes stay OFF until you explicitly approve pointing
+  ERPNEXT_BASE_URL at a production system and log that decision in
+  DECISIONS.md (ERPNEXT_WRITE_ENABLED currently gates this).
+- Real-bench verification of the Frappe sidebar incl. diff/approve UI
+  (no bench exists here).
+- Optional: RAGAS re-score post-hybrid-retrieval (samples ready at
+  data/ragas_samples_2026-08-24T11:32:30Z.json).
+- Housekeeping: the two clearly-labeled test Customers created during
+  Phase 8 verification can be deleted from the UI (our tool has no
+  delete, by design).
+
+## Phase 8 — Write-capable ERPNext Agent: what changed
+
+- **`tools/erpnext_write.py`** — SEPARATE module from the read client
+  (which stays GET-only by construction). Writes exist only behind
+  `ERPNEXT_WRITE_ENABLED=true` (.env), checked at propose AND apply.
+- **Tier-2 discipline**: propose returns an EXACT preview (HTTP method +
+  URL + JSON body) and applies nothing; apply requires explicit
+  `confirmed:true`; proposals one-shot with TTL.
+- **Pre-flight schema validation**: fieldnames not present on the target
+  DocType are refused before any HTTP call (live-proven with a typo'd
+  field).
+- **Create/Update only; DELETE does not exist** in the module (test-
+  asserted). Every applied write appended to
+  `data/erpnext_writes.jsonl` with env label, reason, payload keys.
+- **Endpoints**: POST /tools/erpnext_write/propose|apply with clean
+  refusal mapping (403 flag / 400 confirm+fields+payload / 404 doctype /
+  410 expired).
+- Multi-step actions = sequential individually-confirmed proposals;
+  silent chaining is structurally impossible.
+
+## Phase 8 verification (live staging instance localhost:8081)
+
+| Check | Result |
+|---|---|
+| Master gate | flag off -> 403 writes_disabled (proven before enabling) |
+| Create | propose preview -> confirm -> Customer created live, name returned, audited |
+| Server-validation honesty | group-type customer_group rejected BY FRAPPE; exact server message surfaced loudly |
+| Update | rename applied live; read-back via our read tool confirms |
+| Confirmation gate | confirmed=false -> 400 refusal |
+| Schema preflight | typo'd fieldname refused 400 BEFORE any HTTP call |
+| Audit log | both writes present with env_label=staging, reasons, payload keys |
+| Tests | 88/88 unittest green (11 new guarded-write cases) |
 
 ## Phase 7 — Employee/User mode: what changed
 

@@ -66,6 +66,18 @@ ERPNEXT_MAX_LIST_LIMIT = 100
 # How long the live instance's version info is trusted before re-fetching.
 ORCHESTRATOR_VERSION_TTL_SECONDS = 600
 
+# --- ERPNext writes (Phase 8, guarded) ------------------------------------------
+# Writes are REFUSED unless this was deliberately set in .env. Pointing
+# ERPNEXT_BASE_URL at a production system additionally requires an explicit
+# approval decision logged in DECISIONS.md before enabling (SECURITY.md).
+ERPNEXT_WRITE_ENABLED = os.environ.get(
+    "ERPNEXT_WRITE_ENABLED", "false").lower() == "true"
+ERPNEXT_ENV_LABEL = os.environ.get("ERPNEXT_ENV_LABEL", "unspecified")
+ERPNEXT_WRITE_TTL_MINUTES = int(
+    os.environ.get("ERPNEXT_WRITE_TTL_MINUTES", "15"))
+ERPNEXT_WRITE_MAX_PAYLOAD_BYTES = 100_000
+ERPNEXT_WRITE_AUDIT_LOG = DATA_DIR / "erpnext_writes.jsonl"
+
 # --- Doc corpus ----------------------------------------------------------
 SITEMAP_URL = "https://docs.frappe.io/sitemap.xml"
 

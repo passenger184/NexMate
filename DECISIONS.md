@@ -137,3 +137,17 @@ real code (found live, P1); indexing our own journals means past negative
 probes exist in-corpus, so an ultra-rare-term guard
 (`CONFIDENCE_RARE_TERM_DF_MAX=4`) now blocks the coverage RESCUE — such
 questions decline honestly instead of answering high.
+
+## [2026-08-24] Phase 8: writes enabled for the staging instance only
+**Decision:** ERPNEXT_WRITE_ENABLED=true with ERPNEXT_ENV_LABEL=staging,
+scoped to http://localhost:8081 — a development instance with no real
+company data. Production writes remain OFF; pointing ERPNEXT_BASE_URL at
+a production system requires an explicit approval decision recorded here
+before that configuration stays on.
+**Context:** Phase 8 needs live verification of guarded writes
+(create/update) per ROADMAP; SECURITY.md forbids production writes until
+explicitly approved.
+**Consequences:** every applied write is audit-logged to
+data/erpnext_writes.jsonl with env label + reason; delete is not
+implemented anywhere in the toolchain; two clearly-labeled test Customers
+exist on the staging instance as a result (deletable via its UI).

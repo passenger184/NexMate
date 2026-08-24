@@ -24,6 +24,7 @@ from rag import generator, retriever
 from service import session_store
 from tools import edit as edit_tool
 from tools import erpnext as erpnext_tool
+from tools import erpnext_write as erpnext_write_tool
 from tools import explain as explain_tool
 from tools import files
 from tools import search as search_tool
@@ -197,6 +198,39 @@ class OrchestrateResponse(BaseModel):
     session_id: str | None = None
     turn_count: int | None = None
     condensed_question: str | None = None
+
+
+class ErpnextWriteProposeRequest(BaseModel):
+    action: Literal["create", "update"]
+    doctype: str = Field(min_length=1, max_length=140)
+    payload: dict
+    reason: str = Field(min_length=10, max_length=1000)
+    name: str | None = Field(None, max_length=140)
+
+
+class ErpnextWriteProposalResponse(BaseModel):
+    proposal_id: str
+    action: str
+    doctype: str
+    name: str
+    preview: dict
+    reason: str
+    expires_minutes: int
+    env_label: str
+
+
+class ErpnextWriteApplyRequest(BaseModel):
+    proposal_id: str = Field(min_length=4, max_length=64)
+    confirmed: bool
+
+
+class ErpnextWriteApplyResponse(BaseModel):
+    applied: bool
+    action: str
+    doctype: str
+    name: str
+    result: dict
+    audited: bool
 
 
 @asynccontextmanager
@@ -530,3 +564,64 @@ def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
         turn_count=turn_count,
         condensed_question=condensed,
     )
+
+
+_WRITE_REFUSAL_STATUS = {
+    "writes_disabled": 403,
+    "unsupported_action": 400,
+    "bad_request": 400,
+    "bad_reason": 400,
+    "payload_too_large": 413,
+    "unknown_fields": 400,
+    "doctype_missing": 404,
+    "confirmation_required": 400,
+    "unknown_proposal": 404,
+    "expired_proposal": 410,
+}
+
+
+def _write_refusal_as_http(exc) -> HTTPException:
+    return HTTPException(
+        status_code=_WRITE_REFUSAL_STATUS.get(exc.category, 400),
+        detail=f"[{exc.category}] {exc.detail}",
+    )
+
+
+@app.post("/tools/erpnext_write/propose",
+          response_model=ErpnextWriteProposalResponse)
+def tools_erpnext_write_propose(
+        req: ErpnextWriteProposeRequest) -> ErpnextWriteProposalResponse:
+    """Phase 8: validate a live-data write and return an exact preview.
+
+    Applies NOTHING. Gates: global write flag, allowed actions
+    (create/update only — delete does not exist), reason required,
+    payload caps, pre-flight schema validation of every fieldname.
+    """
+    try:
+        proposal = erpnext_write_tool.propose_write(
+            req.action, req.doctype, req.payload, req.reason, req.name)
+    except erpnext_write_tool.WriteRefusal as exc:
+        raise _write_refusal_as_http(exc) from exc
+    except (erpnext_tool.ErpnextUnavailable,
+            erpnext_tool.ErpnextApiError) as exc:
+        raise _erpnext_http_error(exc) from exc
+    return ErpnextWriteProposalResponse(**proposal)
+
+
+@app.post("/tools/erpnext_write/apply",
+          response_model=ErpnextWriteApplyResponse)
+def tools_erpnext_write_apply(
+        req: ErpnextWriteApplyRequest) -> ErpnextWriteApplyResponse:
+    """Phase 8: execute a confirmed proposal against the live instance.
+
+    The write flag is re-checked here. Every applied write is appended to
+    the audit log (data/erpnext_writes.jsonl).
+    """
+    try:
+        result = erpnext_write_tool.apply_write(
+            req.proposal_id, req.confirmed)
+    except erpnext_write_tool.WriteRefusal as exc:
+        raise _write_refusal_as_http(exc) from exc
+    except erpnext_write_tool.WriteTransportError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ErpnextWriteApplyResponse(**result)

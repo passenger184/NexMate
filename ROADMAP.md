@@ -1,9 +1,10 @@
 # ROADMAP.md — Phase Sequence
 
-**Current phase: Phase 7.** See `ROADMAP.md`'s phase table and
-`SECURITY.md` for standing guardrails. Do not start a later phase until
-the current one meets its Definition of Done and `progress/CURRENT.md`
-is updated to reflect it.
+**Current phase: Phase 8 — complete.** The roadmap is exhausted: all
+eight phases are functionally complete and verified. Standing rules stay
+in force (`SECURITY.md`): writes remain gated on ERPNEXT_WRITE_ENABLED,
+production use requires an explicit approval decision, and every write is
+confirm-gated and audit-logged.
 
 **Scope note:** this is a single-project system for now. Multi-project/
 workspace support is a deferred future direction — see
@@ -19,7 +20,7 @@ explicitly reopens it.
 | 5 | Read-only ERPNext API tool | Live-instance lookups (schemas, field values, doc status) | **Functionally complete (2026-08-24).** Schema/list(+filters)/document verified live at http://localhost:8081; GET-only client, clean 403/404 mapping |
 | 6 | Orchestrator/router | Routes between RAG, code agent, and ERPNext API tool; enforces version-awareness | **Functionally complete (user-accepted 2026-08-24).** All routes + misroute guards verified live; versions injected from the real instance |
 | 7 | Employee/User mode | Restricted persona/prompt on the same orchestrator and knowledge base | **Functionally complete (2026-08-24).** Code agent + schema denied for employees, public-docs-only persona, developer mode unchanged (live control) |
-| 8 | Write-capable ERPNext Agent | Guarded, multi-step actions against live ERPNext data — staging-only until proven safe | Not started |
+| 8 | Write-capable ERPNext Agent | Guarded, multi-step actions against live ERPNext data — staging-only until proven safe | **Functionally complete (2026-08-24).** Flag-gated writes, Tier-2 confirm flow, schema preflight, audit log; create+update verified live on staging (localhost:8081); delete deliberately unimplemented |
 
 ## Sequencing rules
 
