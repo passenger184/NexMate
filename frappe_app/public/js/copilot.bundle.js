@@ -257,16 +257,33 @@
   }
 
   // ---------- API ----------
+  function humanizeError(status, body) {
+    var d = body && body.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) {
+      // FastAPI validation errors: [{loc:["body","question"], msg:...}]
+      return d.map(function (e) {
+        var where = (e.loc || []).slice(1).join(".");
+        return (where ? where + ": " : "") + (e.msg || JSON.stringify(e));
+      }).join("; ");
+    }
+    if (d && typeof d === "object") return JSON.stringify(d);
+    if (body && body.message) return String(body.message);
+    return "HTTP " + status;
+  }
+
   function post(path, body) {
     return fetch(apiBase() + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(function (r) {
-      return r.json().then(function (j) {
-        if (!r.ok) throw new Error(j.detail || ("HTTP " + r.status));
-        return j;
-      });
+      return r.json().catch(function () { return null; })
+        .then(function (j) {
+          if (!r.ok)
+            throw new Error(humanizeError(r.status, j));
+          return j;
+        });
     });
   }
 
@@ -440,6 +457,15 @@
   function submit() {
     var q = S.els.input.value.trim();
     if (!q || S.busy) return;
+    if (q.length < 3 && !q.startsWith("/")) {
+      systemNote("Please type at least 3 characters.");
+      return;
+    }
+    if (q.startsWith("/") && q.trim().split(/\s+/).length === 1 &&
+        ["/read", "/search", "/explain"].indexOf(q.toLowerCase()) !== -1) {
+      systemNote(q + " needs an argument, e.g. " + q + " <something>");
+      return;
+    }
     S.busy = true;
     S.els.sendBtn.disabled = true;
     addUser(q);
