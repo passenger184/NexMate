@@ -61,7 +61,57 @@ def _passage_label(source_type: str) -> str:
     return {
         "our_code": "project code",
         "company_doc": "project docs",
+        "resolved_issue": "past fix in this project",
     }.get(source_type, "framework docs")
+
+
+CONDENSE_PROMPT = """Rewrite the user's follow-up question as ONE short \
+standalone search query (max ~18 words) suitable for keyword search over \
+code and documentation. Rules:
+1. Resolve every conversational reference ("that", "it", "the one you \
+mentioned") against the conversation.
+2. If the conversation established a concrete symbol the follow-up refers \
+to (constant, function, file, flag), the rewritten query MUST contain \
+that exact symbol verbatim.
+3. Drop ALL conversational scaffolding — no "which", "did you just", \
+"where is its value set", "in your previous answer". Keep only the \
+substantive topic words and the symbols.
+4. DO NOT answer the question and DO NOT add facts not present in the \
+conversation or the question.
+Output ONLY the rewritten query text."""
+
+
+def condense_followup(
+    history: list[dict[str, str]], question: str
+) -> str | None:
+    """Rewrite an anaphoric follow-up into a standalone search question.
+
+    Phase 4 session continuity: per-turn retrieval runs BEFORE generation,
+    so a follow-up like "which constant did you just cite?" retrieves
+    nothing on its own terms and gets refused before memory can matter.
+    Condensing uses the history purely to restate the question — answers,
+    gates, and grounding are untouched downstream.
+
+    Returns None on any failure; callers then fall back to the raw
+    question (previous behavior), since this is a retrieval-quality aid,
+    not a safety component.
+    """
+    if not history:
+        return None
+    convo = "\n".join(f"{t['role']}: {t['content']}" for t in history[-4:])
+    messages = [
+        {"role": "system", "content": CONDENSE_PROMPT},
+        {"role": "user",
+         "content": f"Conversation:\n{convo}\n\nFollow-up: {question}"},
+    ]
+    try:
+        rewritten = _complete(messages)
+    except Exception:
+        return None
+    rewritten = rewritten.strip().strip('"')
+    if not rewritten or len(rewritten) > 1000:
+        return None
+    return rewritten
 
 
 def _model_string() -> str:
@@ -114,8 +164,16 @@ def _ungrounded_identifiers(answer: str, chunks: list[dict[str, Any]]) -> list[s
     return bad
 
 
-def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
+def generate_answer(
+    question: str,
+    chunks: list[dict[str, Any]],
+    history: list[dict[str, str]] | None = None,
+) -> str:
     """Generate an answer grounded in the retrieved chunks.
+
+    `history` carries prior turns of the same session (Phase 4 session
+    continuity) and is inserted before the current question; grounding
+    rules still apply to the ANSWER only — retrieval is per-turn.
 
     Raises on any provider failure — fail loud, never fall back to
     answering without context.
@@ -128,10 +186,16 @@ def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
         f"{_passage_label(c.get('source_type', ''))})\n{c['text']}"
         for i, c in enumerate(chunks)
     )
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Question: {question}\n\nContext passages:\n{passages}"},
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": SYSTEM_PROMPT}
     ]
+    for turn in history or []:
+        role = "user" if turn["role"] == "user" else "assistant"
+        messages.append({"role": role, "content": turn["content"]})
+    messages.append({
+        "role": "user",
+        "content": f"Question: {question}\n\nContext passages:\n{passages}",
+    })
     answer = _complete(messages)
 
     # Deterministic citation-compliance check: small local models skip the
@@ -158,7 +222,6 @@ def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
         decline = (
             answer == "I don't have a confident answer for this in the knowledge base."
         )
-
     # Grounding net for leaked identifiers: one corrective retry listing the
     # offending names. If the model still can't produce a clean answer, it is
     # returned as-is — the response contract carries no fabrication flag and

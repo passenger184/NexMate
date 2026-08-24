@@ -48,6 +48,14 @@ EXPLAIN_WINDOW_LINES = 14         # context lines around a hit when excerpting
 # Proposals expire: a stale diff applied days later is how mistakes happen.
 EDIT_PROPOSAL_TTL_MINUTES = int(os.environ.get("EDIT_PROPOSAL_TTL_MINUTES", "15"))
 
+# --- Session continuity (Phase 4) ---------------------------------------------
+# Server-side chat history so refreshing the sidebar doesn't lose the
+# thread (docs/PHASE_4_SPEC.md). Stored as JSON files under data/sessions/.
+SESSIONS_DIR = DATA_DIR / "sessions"
+SESSION_MAX_TURNS = 6        # exchanges (user+assistant) included in prompt
+SESSION_MAX_CHARS = 6000     # hard char ceiling on serialized history
+SESSION_ID_PATTERN = r"[A-Za-z0-9_-]{1,64}"  # filename-safe by construction
+
 # --- Doc corpus ----------------------------------------------------------
 SITEMAP_URL = "https://docs.frappe.io/sitemap.xml"
 

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 import config
 from rag import generator, retriever
+from service import session_store
 from tools import edit as edit_tool
 from tools import explain as explain_tool
 from tools import files
@@ -32,6 +33,10 @@ NO_ANSWER = "I don't have a confident answer for this in the knowledge base."
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
+    session_id: str | None = Field(
+        None, pattern=r"[A-Za-z0-9_-]{1,64}",
+        description="optional thread id; enables server-side continuity",
+    )
 
 
 class Source(BaseModel):
@@ -44,6 +49,17 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[Source]
     confidence: Literal["high", "low", "no_match"]
+    session_id: str | None = None
+    turn_count: int | None = None
+    condensed_question: str | None = None
+
+
+class SessionResetRequest(BaseModel):
+    session_id: str = Field(pattern=r"[A-Za-z0-9_-]{1,64}")
+
+
+class SessionResetResponse(BaseModel):
+    cleared: bool
 
 
 class ReadFileRequest(BaseModel):
@@ -105,6 +121,11 @@ class ProposeEditRequest(BaseModel):
     find: str = Field(min_length=1)
     replace: str = ""
     message: str = Field(min_length=10, max_length=500)
+    context: str = Field(
+        "", max_length=2000,
+        description="question/explanation that motivated this edit; "
+                    "indexed as resolved-issue memory on apply",
+    )
 
 
 class EditProposalResponse(BaseModel):
@@ -126,6 +147,7 @@ class EditApplyResponse(BaseModel):
     commit_hash: str
     message: str
     diff: str
+    memory: dict = {}
 
 
 @asynccontextmanager
@@ -168,30 +190,78 @@ def _dedupe_sources(chunks: list[dict[str, Any]]) -> list[Source]:
 
 @app.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest) -> AskResponse:
+    history: list[dict[str, str]] = []
+    if req.session_id:
+        try:
+            history = session_store.load_history(req.session_id)
+        except session_store.InvalidSessionId as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Phase 4: anaphoric follow-ups ("which constant did you cite?") don't
+    # retrieve on their own terms — condense against the conversation
+    # BEFORE retrieval. Best-effort: on failure we fall back to the raw
+    # question (stateless semantics). Gates downstream stay absolute.
+    search_question = req.question
+    condensed: str | None = None
+    if history:
+        candidate = generator.condense_followup(history, req.question)
+        if candidate:
+            condensed = candidate
+            search_question = candidate
+
     try:
-        chunks = retriever.retrieve(req.question)
+        chunks = retriever.retrieve(search_question)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    confidence = retriever.classify_confidence(chunks, req.question)
-    if confidence == "no_match":
-        # Nothing even topically close: refuse, show nothing.
-        return AskResponse(answer=NO_ANSWER, sources=[], confidence="no_match")
-    if confidence == "low":
-        # Retrieval was mediocre (top score below CONFIDENCE_HIGH_MIN):
-        # refuse deterministically — no LLM call, no chance of a
-        # confidently-wrong answer — but surface the nearest documents so
-        # the user can judge for themselves.
-        return AskResponse(
-            answer=NO_ANSWER,
-            sources=_dedupe_sources(chunks),
-            confidence="low",
-        )
+    confidence = retriever.classify_confidence(chunks, search_question)
+    answer = (
+        NO_ANSWER if confidence in ("no_match", "low")
+        else generator.generate_answer(req.question, chunks, history)
+    )
 
-    answer = generator.generate_answer(req.question, chunks)
+    turn_count: int | None = None
+    if req.session_id:
+        try:
+            # Persist BOTH sides of the exchange so the next call sees it.
+            n1 = session_store.append_turn(
+                req.session_id, "user", req.question)
+            n2 = session_store.append_turn(
+                req.session_id, "assistant", answer)
+            turn_count = min(n1, n2)
+        except (session_store.InvalidSessionId, RuntimeError) as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if confidence == "no_match":
+        return AskResponse(answer=answer, sources=[],
+                           confidence="no_match",
+                           session_id=req.session_id,
+                           turn_count=turn_count,
+                           condensed_question=condensed)
+    if confidence == "low":
+        return AskResponse(answer=answer,
+                           sources=_dedupe_sources(chunks),
+                           confidence="low",
+                           session_id=req.session_id,
+                           turn_count=turn_count,
+                           condensed_question=condensed)
+
     return AskResponse(
         answer=answer, sources=_dedupe_sources(chunks), confidence=confidence,
+        session_id=req.session_id, turn_count=turn_count,
+        condensed_question=condensed,
     )
+
+
+@app.post("/tools/session/reset", response_model=SessionResetResponse)
+def tools_session_reset(req: SessionResetRequest) -> SessionResetResponse:
+    """"Start fresh": clears the visible thread. Resolved-issue knowledge
+    indexed in Chroma is permanent and deliberately untouched."""
+    try:
+        cleared = session_store.delete_session(req.session_id)
+    except session_store.InvalidSessionId as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SessionResetResponse(cleared=cleared)
 
 
 @app.get("/health")
@@ -282,7 +352,7 @@ def tools_propose_edit(req: ProposeEditRequest) -> EditProposalResponse:
     """
     try:
         proposal = edit_tool.propose_edit(
-            req.path, req.find, req.replace, req.message
+            req.path, req.find, req.replace, req.message, req.context
         )
     except edit_tool.EditRefusal as exc:
         raise _refuse_as_http(exc) from exc

@@ -35,7 +35,9 @@ _embed_model: HuggingFaceEmbedding | None = None
 _index: VectorStoreIndex | None = None
 _chroma_collection = None
 
-COMPANY_SOURCE_TYPES = ("our_code", "company_doc")
+# resolved_issue chunks (Phase 4) ride in the boosted company pool so past
+# fixes surface alongside current code and docs.
+COMPANY_SOURCE_TYPES = ("our_code", "company_doc", "resolved_issue")
 
 
 def _get_embed_model() -> HuggingFaceEmbedding:

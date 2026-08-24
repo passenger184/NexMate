@@ -127,8 +127,13 @@ def _prune_store() -> None:
 
 # --- public flow ---------------------------------------------------------------
 
-def propose_edit(path: str, find: str, replace: str, message: str) -> dict[str, Any]:
+def propose_edit(path: str, find: str, replace: str, message: str,
+                 context: str = "") -> dict[str, Any]:
     """Validate an edit request fully; return it as a unified diff.
+
+    `context` (optional) records the question/explanation that motivated
+    the edit — it travels with the proposal and is indexed as a
+    resolved_issue chunk on apply (Phase 4 project memory).
 
     NOTHING is written to disk here. Every refusal condition from
     SECURITY.md is checked up front so the user sees problems BEFORE they
@@ -215,6 +220,7 @@ def propose_edit(path: str, find: str, replace: str, message: str) -> dict[str, 
         "updated": updated,
         "message": message.strip(),
         "diff": diff,
+        "context": (context or "").strip(),
     }
     return {
         "proposal_id": proposal_id,
@@ -278,13 +284,30 @@ def apply_edit(proposal_id: str, confirmed: bool) -> dict[str, Any]:
     commit_hash = _git("rev-parse", "--short", "HEAD").strip()
     del _PROPOSALS[proposal_id]  # one-shot by design
 
-    return {
+    result = {
         "applied": True,
         "path": rel,
         "commit_hash": commit_hash,
         "message": proposal["message"],
         "diff": proposal["diff"],
     }
+
+    # Phase 4 project memory: the confirmed edit becomes a retrievable
+    # resolved_issue chunk. The edit itself is already committed and safe;
+    # a memory failure must not undo it, but it must be VISIBLE.
+    try:
+        from tools import memory as memory_tool
+        memory = memory_tool.index_resolution(
+            rel_path=rel,
+            commit_hash=commit_hash,
+            message=proposal["message"],
+            context=proposal.get("context", ""),
+            diff=proposal["diff"],
+        )
+        result["memory"] = memory
+    except Exception as exc:
+        result["memory"] = {"indexed": False, "error": str(exc)}
+    return result
 
 
 def _current_content(rel: str) -> str:
