@@ -6,6 +6,16 @@ part of completing meaningful units of work — not just at phase end.
 ## [Unreleased]
 
 ### Added
+- Phase 3 Company Knowledge: `ingestion/ingest_project.py` indexes this
+  repo into the same Chroma collection (`our_code` via stdlib-ast boundary
+  chunking, `company_doc` via heading splits; idempotent re-sync). Index:
+  7,410 public + 321 project chunks.
+- Two-pool vector retrieval (public vs project) fused with RRF under
+  `FUSION_COMPANY_BOOST`; generator passages labeled
+  project-code/project-docs/framework-docs with an authority rule.
+- Rare-term rescue guard in the confidence gate for self-referential corpus.
+
+### Changed
 - Phase 2 code tools, Tier 1 (complete): `tools/pathsafe.py`
   (project-root scoping — resolve-then-verify, symlink-aware, loud
   rejections), `tools/files.py` (`read_project_file`, size-capped, strict
@@ -15,7 +25,14 @@ part of completing meaningful units of work — not just at phase end.
   Service endpoints: `POST /tools/read_file|search|explain`. Unittest
   suite under `tests/` (30 cases) covering traversal/absolute/symlink
   escapes, gitignore exclusion, decoy-file ranking, excerpt spans.
-- `PROJECT_ROOT` and `MAX_READ_FILE_BYTES` configuration.
+- Phase 2 Tier 2 (edit flow): `tools/edit.py` +
+  `POST /tools/propose_edit|apply_edit` — clean-tree gate with
+  target-aware refusals, tracked-not-ignored checks, exactly-once match,
+  unified-diff proposals (TTL'd, one-shot), explicit `confirmed:true`
+  required at apply, one atomic single-file commit per edit. 14 edit-flow
+  tests against a real throwaway git repo; proven live with three real
+  isolated doc-fix commits (`8a520b3`, `9552c00`, `c986988`).
+- `PROJECT_ROOT`, `MAX_READ_FILE_BYTES`, and proposal-TTL configuration.
 
 ### Changed
 - Doc-set audit: AGENTS.md read-order numbering + phase-agnostic phase
@@ -26,6 +43,11 @@ part of completing meaningful units of work — not just at phase end.
 
 ### Fixed
 - README bench-install path typo (`erpnot_ai_copilot`).
+- Module-docstring chunks starving real symbol chunks in per-document
+  dedupe (P1 declined despite correct sources); rare-term gate now blocks
+  coverage-rescue for df<=4 tokens, keeping documented negative probes
+  (`frappe.auto_sync_with_jupiter`) in honest-decline territory after the
+  journals entered the corpus.
 
 ## [2026-08-24] — Phase 1
 

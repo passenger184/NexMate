@@ -241,3 +241,54 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
 - Verification: 30/30 unittest (incl. decoy-file regression + excerpt-span
   tests); live search 18 hits/65 files with .env excluded; live explain
   grounded walkthrough of the read_file flow.
+
+- Phase 2 Task 3 (Tier-2 edit flow): two-endpoint design over an ephemeral
+  server-side proposal store (uuid id, 15-min TTL, 50-slot cap, one-shot on
+  apply). Gate ordering refined during testing: the clean-tree check is
+  target-aware — an untracked TARGET file gets the precise "not in version
+  control" refusal (with git add guidance) instead of a generic
+  commit-or-stash, because '?? <target>' in porcelain IS the dirt; apply
+  re-checks tracked -> stale-content -> clean in that order so a changed
+  target reports stale_proposal (the diff the user saw is void) even when
+  unrelated dirt also exists. find must match exactly once; ambiguity
+  refused with observed counts — this caught ME twice live when my own
+  find strings ignored line-wrapping (0 occurrences), which is precisely
+  the sloppy-edit class the gate exists to stop.
+- Live end-to-end per DoD: prerequisite commit of session work first
+  (ae49a87 — the clean-tree gate correctly refuses otherwise), then three
+  real doc-drift fixes through the full propose->diff->confirm->apply->
+  commit cycle: 8a520b3 (README chunk count 7400->7410 post-purge),
+  9552c00 (README retrieval description matches hybrid RRF reality),
+  c986988 (DEVELOPMENT gains the unittest command). Each verified as its
+  own single-file commit via git show --name-only.
+- Live refusals demonstrated: dirty-tree 409 naming the stray file,
+  .env ignored-file 400 (won't touch secrets silently),
+  confirmation-required 400, ambiguous-match 400 x2. Tree ended clean.
+
+## [2026-08-24] — session 7: Phase 3 (Company Knowledge)
+
+- SECURITY.md cloud-provider precondition checked before ingesting company
+  material: GENERATION_PROVIDER=ollama (local) — no third-party exposure,
+  no confirmation needed per the rule's wording.
+- Assumption logged (spec said "ask what internal docs exist"): the repo's
+  own markdown IS the internal-docs corpus on this box — root *.md +
+  docs/*.md + progress/*.md as company_doc; user can point at external
+  material later, ingest_project.py re-runs idempotently.
+- ingest_project.py: stdlib ast boundary chunking for .py (no tree-sitter
+  per spec), MarkdownNodeParser for .md, same resplit budget as public
+  pipeline. Idempotent sync deletes only our_code/company_doc chunks.
+- Two live-found bugs fixed during verification:
+  (1) standalone module-docstring chunks lost best-per-document dedupe to
+  symbol chunks → P1 got the intro without the mechanism and generation
+  honestly declined; fix = merge preamble into first symbol chunk.
+  (2) indexing our own journals put past negative probes in-corpus:
+  auto_sync_with_jupiter df=4 defeated the df=0 veto AND an earlier
+  leftover unconditional-rescue block (stale duplicate from the Phase-1
+  gate edit) kept it high after the rare-term guard was added. Both fixed;
+  N2 now low+sources (honest decline). Lesson: when editing gate ladders,
+  grep for superseded blocks.
+- Also: corpus_df initially looked up unfolded surface forms (pathsafe →
+  pathsaf phantom df=0); normalize inside corpus_df. And uvicorn must be
+  launched with setsid like any long-lived child — a timed-out parent
+  shell otherwise takes the service down with its process group mid-probe.
+- Phase 3 sweep saved to data/phase3_sweep.json (P1–P6, D2, negatives).

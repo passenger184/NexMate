@@ -27,12 +27,15 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 import config
-from rag.keyword_index import get_keyword_index
+from rag.keyword_index import get_keyword_index, tokenize as tokenize_for_gate
 
 # Module-level singletons — the embedding model (~130MB) and indexes are
 # expensive to build and identical for every request.
 _embed_model: HuggingFaceEmbedding | None = None
 _index: VectorStoreIndex | None = None
+_chroma_collection = None
+
+COMPANY_SOURCE_TYPES = ("our_code", "company_doc")
 
 
 def _get_embed_model() -> HuggingFaceEmbedding:
@@ -42,23 +45,69 @@ def _get_embed_model() -> HuggingFaceEmbedding:
     return _embed_model
 
 
-def get_index() -> VectorStoreIndex:
-    """Load the persisted vector store as a queryable index."""
-    global _index
-    if _index is None:
+def get_chroma_collection():
+    """The persisted collection, shared by vector pools and keyword index."""
+    global _chroma_collection
+    if _chroma_collection is None:
         client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
         try:
-            collection = client.get_collection(config.COLLECTION_NAME)
+            _chroma_collection = client.get_collection(config.COLLECTION_NAME)
         except Exception as exc:  # chroma raises bare ValueError subclasses
             raise RuntimeError(
                 f"Collection '{config.COLLECTION_NAME}' not found in "
                 f"{config.CHROMA_DIR}. Run `python -m ingestion.chunk_and_embed` first."
             ) from exc
-        vector_store = ChromaVectorStore(chroma_collection=collection)
+    return _chroma_collection
+
+
+def get_index() -> VectorStoreIndex:
+    """Load the persisted vector store as a queryable index."""
+    global _index
+    if _index is None:
+        vector_store = ChromaVectorStore(
+            chroma_collection=get_chroma_collection()
+        )
         _index = VectorStoreIndex.from_vector_store(
             vector_store, embed_model=_get_embed_model()
         )
     return _index
+
+
+def _vector_pool(question_embedding: list[float], where: dict,
+                 pool: int) -> list[dict[str, Any]]:
+    """One similarity-search pool against a metadata-filtered slice.
+
+    Direct Chroma query (rather than the LlamaIndex retriever) so public
+    docs and project material are retrieved as SEPARATE ranked lists and
+    fused with explicit weights. Similarity conversion matches config's
+    documented semantics: exp(-cosine_distance).
+    """
+    import math
+
+    res = get_chroma_collection().query(
+        query_embeddings=[question_embedding],
+        n_results=pool,
+        where=where,
+        include=["documents", "metadatas", "distances"],
+    )
+    out: list[dict[str, Any]] = []
+    ids = res.get("ids", [[]])[0]
+    docs = res.get("documents", [[]])[0]
+    metas = res.get("metadatas", [[]])[0]
+    dists = res.get("distances", [[]])[0]
+    for cid, text, meta, dist in zip(ids, docs, metas, dists):
+        meta = meta or {}
+        out.append({
+            "id": cid,
+            "text": text or "",
+            "score": math.exp(-(dist or 0.0)),
+            "bm25_score": 0.0,
+            "title": str(meta.get("title", "")),
+            "section": str(meta.get("section", "")),
+            "url_or_path": str(meta.get("url_or_path", "")),
+            "source_type": str(meta.get("source_type", "")),
+        })
+    return out
 
 
 def _cosine(query_vec: list[float], text: str) -> float:
@@ -75,35 +124,41 @@ def _cosine(query_vec: list[float], text: str) -> float:
 
 
 def retrieve(question: str, k: int | None = None) -> list[dict[str, Any]]:
-    """Return top-k chunks fused across both signals.
+    """Return top-k chunks fused across three signals.
+
+    Vector similarity is retrieved as TWO pools — public docs and project
+    material (our_code/company_doc) — so the company pool can be boosted
+    explicitly instead of hoping 331 project chunks out-rank 7,410 doc
+    chunks on raw cosine. The third signal is global BM25. All three fuse
+    via Reciprocal Rank Fusion before best-chunk-per-document dedupe.
 
     Each result: {text, score, bm25_score, title, section, url_or_path,
-    source_type}, best fused rank first, at most one chunk per source
-    document so a single page's sections can't crowd the context window.
+    source_type}, best fused rank first.
     """
     top_k = k or config.RETRIEVAL_K
     pool = top_k * config.CANDIDATE_MULTIPLIER
 
-    scored_nodes = get_index().as_retriever(
-        similarity_top_k=pool
-    ).retrieve(question)
     query_vec = _get_embed_model().get_query_embedding(question)
+    public_pool = _vector_pool(
+        query_vec, {"source_type": "public_doc"}, pool
+    )
+    company_pool = _vector_pool(
+        query_vec, {"source_type": {"$in": list(COMPANY_SOURCE_TYPES)}}, pool
+    )
 
     candidates: dict[str, dict[str, Any]] = {}
-    vector_order: list[str] = []
-    for ranked in scored_nodes:
-        meta = ranked.node.metadata
-        cid = ranked.node.id_
-        vector_order.append(cid)
-        candidates[cid] = {
-            "text": ranked.node.get_content(),
-            "score": float(ranked.score) if ranked.score is not None else 0.0,
-            "bm25_score": 0.0,
-            "title": str(meta.get("title", "")),
-            "section": str(meta.get("section", "")),
-            "url_or_path": str(meta.get("url_or_path", "")),
-            "source_type": str(meta.get("source_type", "")),
-        }
+    vector_orders: dict[str, list[str]] = {
+        "public": [],
+        "company": [],
+    }
+    for pool_name, pool_rows in (("public", public_pool),
+                                 ("company", company_pool)):
+        for row in pool_rows:
+            cid = row.pop("id")
+            vector_orders[pool_name].append(cid)
+            if cid in candidates:
+                continue
+            candidates[cid] = row
 
     keyword_hits = get_keyword_index().search(question, pool)
     keyword_order: list[str] = []
@@ -130,8 +185,7 @@ def retrieve(question: str, k: int | None = None) -> list[dict[str, Any]]:
     # whole corpus' texts in RAM twice.
     missing_ids = [cid for cid, c in candidates.items() if c.pop("_needs_text", False)]
     if missing_ids:
-        client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-        rows = client.get_collection(config.COLLECTION_NAME).get(
+        rows = get_chroma_collection().get(
             ids=missing_ids, include=["documents"]
         )
         bodies = dict(zip(rows["ids"], rows.get("documents") or []))
@@ -141,14 +195,17 @@ def retrieve(question: str, k: int | None = None) -> list[dict[str, Any]]:
             candidates[cid]["score"] = _cosine(query_vec, text) if text else 0.0
 
     rrf: dict[str, float] = {}
-    for rank, cid in enumerate(vector_order, start=1):
-        rrf[cid] = rrf.get(cid, 0.0) + config.FUSION_VECTOR_WEIGHT / (
-            config.RRF_K + rank
-        )
+    boost = config.FUSION_COMPANY_BOOST
+
+    def add_rank(cid: str, rank: int, weight: float) -> None:
+        rrf[cid] = rrf.get(cid, 0.0) + weight / (config.RRF_K + rank)
+
+    for rank, cid in enumerate(vector_orders["public"], start=1):
+        add_rank(cid, rank, config.FUSION_VECTOR_WEIGHT)
+    for rank, cid in enumerate(vector_orders["company"], start=1):
+        add_rank(cid, rank, config.FUSION_VECTOR_WEIGHT * boost)
     for rank, cid in enumerate(keyword_order, start=1):
-        rrf[cid] = rrf.get(cid, 0.0) + config.FUSION_KEYWORD_WEIGHT / (
-            config.RRF_K + rank
-        )
+        add_rank(cid, rank, config.FUSION_KEYWORD_WEIGHT)
 
     ordered_ids = sorted(rrf, key=lambda c: rrf[c], reverse=True)
     doc_counts: dict[str, int] = {}
@@ -213,9 +270,14 @@ def classify_confidence(chunks: list[dict[str, Any]], question: str) -> str:
         return "no_match"
     if top >= config.CONFIDENCE_HIGH_MIN_SIMILARITY:
         return "high"
+    rare_terms = [
+        t for t in set(tokenize_for_gate(question))
+        if 0 < keyword_index.corpus_df(t) <= config.CONFIDENCE_RARE_TERM_DF_MAX
+    ]
     if (
         top >= config.CONFIDENCE_RESCUE_MIN_SIMILARITY
         and coverage >= config.CONFIDENCE_RESCUE_MIN_COVERAGE
+        and not rare_terms
     ):
         return "high"
     if top >= config.CONFIDENCE_LOW_MIN_SIMILARITY:

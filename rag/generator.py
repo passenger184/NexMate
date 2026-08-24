@@ -50,7 +50,18 @@ partially, answer the parts they DO cover and briefly note what is \
 missing instead of declining outright.
 5. Prefer numbered steps over prose. Keep any code from the passages intact.
 6. The passages come from current-version official documentation; do not \
-claim version-specific behavior the passages don't state."""
+claim version-specific behavior the passages don't state. Passages labeled \
+"project code" or "project docs" describe THIS repository itself (its own \
+tools, service, configuration, and internal documentation) — when a \
+question concerns this project's actual behavior, those passages are the \
+authoritative source and take precedence over generic framework docs."""
+
+
+def _passage_label(source_type: str) -> str:
+    return {
+        "our_code": "project code",
+        "company_doc": "project docs",
+    }.get(source_type, "framework docs")
 
 
 def _model_string() -> str:
@@ -113,7 +124,8 @@ def generate_answer(question: str, chunks: list[dict[str, Any]]) -> str:
         return "I don't have a confident answer for this in the knowledge base."
 
     passages = "\n\n".join(
-        f"[{i + 1}] ({c['title']} — {c['section']})\n{c['text']}"
+        f"[{i + 1}] ({c['title']} — {c['section']}; "
+        f"{_passage_label(c.get('source_type', ''))})\n{c['text']}"
         for i, c in enumerate(chunks)
     )
     messages = [

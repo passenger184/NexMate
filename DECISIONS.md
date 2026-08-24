@@ -114,3 +114,26 @@ time.
 **Consequences:** Simpler to build and keep in sync; mode-based filtering
 (developer vs. employee, later) becomes a metadata filter, not a system
 swap.
+
+## [2026-08-24] Phase 3: project corpus mixing + code chunking
+**Decision:** Ingest this repo's own source (.py via stdlib-ast
+function/class-boundary splitting) and markdown (heading-split) into the ONE
+existing Chroma collection tagged `our_code`/`company_doc`; at query time,
+vector retrieval runs as TWO pools (public vs project) fused with RRF under
+a modest company boost (`FUSION_COMPANY_BOOST=1.25`); generator passages
+carry explicit labels ("project code"/"project docs"/"framework docs").
+**Context:** PHASE_3_SPEC requires company answers to win when both corpora
+cover a question, without letting 325 project chunks get swamped by (or
+swamp) 7,410 public chunks. Spec explicitly prefers simple boundary
+chunking before any tree-sitter adoption.
+**Alternatives considered:** single undifferentiated pool (scoring would be
+dominated by whichever corpus is larger); separate collections (violates
+the one-store ADR); tree-sitter (deferred until simple chunking proves
+inadequate per spec).
+**Consequences:** idempotent re-ingest deletes+reinserts only project
+chunks (public index untouched); module preambles merge into the first
+symbol chunk after standalone-docstring chunks lost per-document dedupe to
+real code (found live, P1); indexing our own journals means past negative
+probes exist in-corpus, so an ultra-rare-term guard
+(`CONFIDENCE_RARE_TERM_DF_MAX=4`) now blocks the coverage RESCUE — such
+questions decline honestly instead of answering high.

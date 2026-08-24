@@ -117,6 +117,7 @@ class KeywordIndex:
             term: math.log(1.0 + (n_docs - dfr + 0.5) / (dfr + 0.5))
             for term, dfr in df.items()
         }
+        self.document_frequency = dict(df)
 
     def _bm25_score(self, doc_idx: int, query_terms: list[str]) -> float:
         tf_map = self.term_freqs[doc_idx]
@@ -181,6 +182,18 @@ class KeywordIndex:
             weight(t) for t in query_terms if t in chunk_terms
         )
         return matched_weight / total_weight
+
+    def corpus_df(self, term: str) -> int:
+        """Chunks containing this term (surface form OK; folding applied).
+
+        Lookup happens on NORMALIZED tokens because the df map is keyed by
+        tokenize() output ('pathsafe' folds to 'pathsaf'); callers passing
+        already-normalized tokens are handled since folding is idempotent.
+        """
+        tokens = tokenize(term)
+        if not tokens:
+            return 0
+        return min(self.document_frequency.get(t, 0) for t in tokens)
 
     def unseen_query_terms(self, question: str) -> list[str]:
         """Informative query terms that appear NOWHERE in the corpus.

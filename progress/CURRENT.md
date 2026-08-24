@@ -1,8 +1,60 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 6, continued: Phase 2 Task 2 built and verified — Tier-1 search + explain live; Tier 1 complete)
-**Current phase:** Phase 2 — Live code read/edit agent (see `docs/PHASE_2_SPEC.md`; `SECURITY.md` guardrails enforced in code from day one)
-**Current task:** Phase 2 Tasks 1–2 (all of Tier 1) complete. Next: Task 3 — the Tier-2 edit flow.
+**Last updated:** 2026-08-24 (session 7: Phase 3 — Company Knowledge — built and verified; project corpus live in the index, DoD met)
+**Current phase:** Phase 3 — Company Knowledge (`docs/PHASE_3_SPEC.md`) — functionally complete, awaiting user acceptance
+**Current task:** None in flight. Proposed next: Phase 4 — Project Memory (`docs/PHASE_4_SPEC.md`), which builds directly on Phase 2's edit commits.
+
+## Phase 2 closure note (2026-08-24)
+
+Phase 2 accepted via user instruction to proceed. All six DoD items in
+`docs/PHASE_2_SPEC.md` verified (see the Phase 2 progress section below);
+the only bench-dependent leftover is the sidebar's diff/approve UI
+(`docs/UI_SPEC.md`), same conscious-deferral pattern as Phase 1.
+
+## Phase 3 — Company Knowledge: what changed
+
+- **`ingestion/ingest_project.py`** — indexes this repo into the SAME
+  Chroma collection: .py files as `our_code` (stdlib-ast function/class-
+  boundary chunks; oversized classes split at methods; module preamble
+  merged into the first symbol chunk after a standalone-docstring chunk
+  lost per-document dedupe to real code), repo markdown as `company_doc`
+  (MarkdownNodeParser headings). Idempotent: deletes stale project chunks,
+  never touches public docs. Live index: **7,410 public + 321 project =
+  7,731 chunks**.
+- **`rag/retriever.py`** — vector retrieval now runs as TWO metadata-
+  filtered pools (public_doc vs our_code/company_doc) fused with RRF under
+  `FUSION_COMPANY_BOOST=1.25`, so specific company answers beat generic
+  framework pages without letting either corpus dominate by size.
+- **`rag/generator.py`** — passages labeled "project code"/"project docs"/
+  "framework docs"; prompt states project material is authoritative for
+  questions about this repository's own behavior.
+- **Gate hardening for self-referential corpus**: indexing our own journals
+  put past negative probes (`auto_sync_with_jupiter` df=4) into the corpus,
+  defeating the df=0 veto. New rule: terms with df ≤
+  `CONFIDENCE_RARE_TERM_DF_MAX` cannot be RESCUED into high — such
+  questions decline deterministically instead (N2 → low + sources, honest).
+
+## Phase 3 verification (live POST /ask, `data/phase3_sweep.json`)
+
+| Probe | Verdict |
+|---|---|
+| P1 project-root scoping location | PASS — walks PROJECT_ROOT config + `tools.pathsafe` resolve/verify + `PathOutsideRootError`, all verbatim (initially declined due to docstring-chunk dedupe bug; fixed + re-verified) |
+| P2 dirty-tree refusal | PASS — names `_refuse_if_dirty`, quotes the actual refusal message |
+| P3 hybrid RRF fusion | PASS — real constants (`RRF_K`, `BM25_K1/B`, fusion weights) with correct module attributions |
+| P4 boot.py ↔ sidebar | PASS — `extend_bootinfo` → `boot_session` → `copilot_api_base` → `frappe.boot.copilot_settings` |
+| P5 base64 scrub rationale | PASS — `BASE64_DATA_URI_RE`, `[image]` placeholder, gibberish-chunk history grounded |
+| P6 chunking pipeline | PASS — two-stage parser/resplit with exact config values from project code |
+| D2 preference case | PASS — "convert Chroma distances to similarity" cites `rag/retriever.py:_vector_pool` exp(-distance) FIRST; generic framework doc ranked last |
+| Negatives | N1/N3 no_match empty-sources; N2 low + sources (honest decline, no fabrication — see gate note above) |
+
+## Phase 3 DoD status (`docs/PHASE_3_SPEC.md`)
+
+- [x] Custom app source code ingested and retrievable
+- [x] ≥5 project-specific questions answered correctly, company code vs
+      public docs distinguished (P1–P6 above)
+- [x] Dual-answerable question prefers/cites company code (D2)
+- [x] `progress/CURRENT.md` + `DECISIONS.md` updated (ADR [2026-08-24]
+      Phase 3: corpus mixing + code chunking)
 
 ## Phase 1 closure note (2026-08-24, user decision)
 
@@ -160,16 +212,19 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
 
 ## Next step
 
-**Phase 2 Task 3: the Tier-2 edit flow.**
-1. Git-clean gate: refuse any edit while `git status` is dirty (tell the
-   user to commit/stash — never auto-stash).
-2. Propose-as-diff: show the exact unified diff before applying.
-3. Explicit per-edit confirmation, then apply + atomic commit with a clear
-   message; never batch edits into one unreviewed commit.
-4. Refuse: paths outside PROJECT_ROOT, untracked files, git-ignored files
-   (.env, caches) — say so and ask how to proceed instead of skipping.
-5. Verify per spec DoD (≥3 real end-to-end edits, each isolated in its own
-   commit).
+**Phase 2 is functionally complete — every DoD item in
+`docs/PHASE_2_SPEC.md` verified (see Phase 2 progress below).**
+Remaining, bench-dependent only: the Frappe sidebar's diff/approve UI
+(`docs/UI_SPEC.md` "Diff / edit approval") can be written but not tested
+without a real bench — same conscious-deferral pattern as the Phase 1
+sidebar install.
+
+Upon user acceptance: start **Phase 3 — Company Knowledge**
+(`docs/PHASE_3_SPEC.md`): ingest this project's custom app source +
+internal docs into the existing Chroma store under `our_code` /
+`company_doc` source-type tags. Note SECURITY.md's cloud-provider rule:
+before Phase 3 puts company material into retrieval prompts, re-confirm
+the `GENERATION_PROVIDER` choice with the user.
 
 ## Phase 2 progress
 
@@ -204,3 +259,31 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
   parsing-the-read_file-response description and walks the actual call
   chain grounded in excerpt text (first iteration ranked ingestion scripts
   top — fixed by the specificity weighting before sign-off).
+- **Task 3 DONE (2026-08-24).** `tools/edit.py` + `POST /tools/propose_edit`
+  / `POST /tools/apply_edit`. Gate order: validate → resolve (root scoping)
+  → target-aware clean-tree gate (an untracked TARGET gets the precise
+  "not in version control" refusal; unrelated dirt gets commit-or-stash) →
+  tracked-not-ignored distinction via ls-files/check-ignore → exactly-once
+  find match (ambiguity refused with counts) → unified diff returned,
+  NOTHING written. Apply: requires explicit `confirmed:true`, re-checks
+  tracked/stale/clean at apply time, writes+stages+commits that ONE file
+  (atomic, batching structurally impossible), returns the short hash;
+  proposals are one-shot with a 15-min TTL. Verified: 44/44 unittest cases
+  (14 edit-specific, against a real throwaway git repo); live end-to-end —
+  **three real edits applied as three isolated single-file commits**
+  (`8a520b3`, `9552c00`, `c986988`: README chunk-count fix, README hybrid-
+  retrieval description fix, DEVELOPMENT unit-test command), plus live
+  refusals for dirty-tree (409), ignored `.env` (400), missing explicit
+  confirmation (400), and ambiguous match ×2 (400).
+
+## Phase 2 DoD status (`docs/PHASE_2_SPEC.md`)
+
+- [x] Tier 1 (read/search/explain) verified working against this project
+- [x] Path-traversal attempt verified rejected, not silently redirected
+      (`../../../etc/passwd`, `/etc/passwd`, symlink-out all HTTP 400)
+- [x] Tier 2 refuses to edit when the git tree isn't clean (unit + live)
+- [x] ≥3 real edits end-to-end (diff shown → confirmed → applied →
+      committed), each isolated in its own commit
+- [x] Edit targeting a git-ignored file refused with clear explanation
+      (`.env` live-refused; cache-file case covered in tests)
+- [x] `progress/CURRENT.md` updated (this document)

@@ -128,6 +128,11 @@ BM25_B = 0.75              # Okapi document-length normalization
 # topic-adjacent).
 FUSION_VECTOR_WEIGHT = 1.0
 FUSION_KEYWORD_WEIGHT = 1.5
+# Phase 3: project material (our_code/company_doc) gets a modest rank
+# boost in fusion, so when public docs AND this repo both cover a question,
+# the more specific company answer wins (PHASE_3_SPEC DoD). Modest on
+# purpose: it must never drag irrelevant code over genuinely-relevant docs.
+FUSION_COMPANY_BOOST = 1.25
 # A document may take a SECOND top-k slot when another of its chunks carries
 # near-equal lexical evidence (bm25 >= this fraction of the page's best).
 # Huge multi-section pages (hooks.md: 94 chunks) otherwise lose the exact
@@ -164,3 +169,12 @@ CONFIDENCE_RESCUE_MIN_COVERAGE = 0.45
 # no_match regardless of cosine (fixes negatives scoring 0.74+ via generic
 # words like "frappe"/"configure").
 CONFIDENCE_NO_MATCH_MAX_COVERAGE = 0.05
+# A query term appearing in <= this many corpus documents is too rare to
+# justify the coverage RESCUE into "high": when the only distinctive
+# evidence is near-absent AND cosine is merely mediocre, decline instead.
+# Needed once Phase 3 indexed our own journals — they mention past negative
+# probes verbatim (e.g. auto_sync_with_jupiter, df=4 across progress files),
+# which defeats the df=0 veto for exactly those fabricated-feature
+# questions (found 2026-08-24). Legit rescues use common vocabulary; the
+# primary cos>=0.80 path is unaffected.
+CONFIDENCE_RARE_TERM_DF_MAX = 4
