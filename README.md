@@ -204,7 +204,9 @@ ingestion/chunk_and_embed.py       # heading chunks -> Chroma (cosine)
 rag/retriever.py              # hybrid BM25+vector retrieval, confidence gate
 rag/keyword_index.py          # in-house Okapi BM25 over the Chroma corpus
 rag/generator.py              # THE one litellm call site (provider-agnostic)
-service/main.py               # FastAPI: /ask, /tools/read_file|search|explain, /health
+service/main.py               # FastAPI: /ask, /tools/*, /health
+service/session_store.py      # server-side session threads (Phase 4)
+tools/memory.py               # confirmed edits -> resolved_issue chunks
 tools/pathsafe.py             # project-root path safety (the security primitive)
 tools/files.py                # Tier-1 read_file tool
 tools/search.py               # Tier-1 gitignore-aware code search
