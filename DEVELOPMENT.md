@@ -100,3 +100,9 @@ directories/services beyond what the current phase requires (e.g., no
 
 See `EVALUATION.md` for the question set and how to score answers before
 declaring the phase done.
+
+Unit tests for the code tools run on stdlib only (no extra deps):
+
+```bash
+python -m unittest discover -s tests
+```
