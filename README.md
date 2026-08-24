@@ -142,6 +142,21 @@ weighted matches, feeds excerpts to the generation model under the same
 grounded-only rules as `/ask`, and cites `path` + line ranges; it declines
 honestly when no matching code exists.
 
+### Orchestrator (Phases 6–7)
+
+```bash
+curl -s http://127.0.0.1:8000/orchestrate \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "What fields does Customer have?", "mode": "developer"}'
+```
+
+Single entry point that routes between RAG (general docs), the code agent
+(this repo's source), and the live ERPNext tool — responses carry `route`,
+`route_how`, and live `version_info`. `mode: "employee"` switches to a
+plain-language desk-user persona over public docs only: the code agent and
+DocType-schema lookups are denied, while document/list lookups stay
+available. Sessions work here exactly like on `/ask` (`session_id`).
+
 ## Install the Desk sidebar (Frappe app)
 
 On the machine running your ERPNext bench:

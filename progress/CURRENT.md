@@ -1,8 +1,13 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 10: Phase 6 — Orchestrator/router — built and verified; all four routes proven live with version-awareness)
-**Current phase:** Phase 6 — Orchestrator/router (ROADMAP.md) — functionally complete, awaiting user acceptance
-**Current task:** None in flight. Proposed next: Phase 7 — Employee/User mode (restricted persona on this orchestrator).
+**Last updated:** 2026-08-24 (session 11: Phase 7 — Employee/User mode — restricted persona live with least-privilege routes; DoD met)
+**Current phase:** Phase 7 — Employee/User mode (ROADMAP.md) — functionally complete, awaiting user acceptance
+**Current task:** None in flight. Proposed next: Phase 8 — Write-capable ERPNext Agent (LAST roadmap phase; staging-only per SECURITY.md).
+
+## Phase 6 closure note (2026-08-24)
+
+Phase 6 accepted via user instruction to proceed (commit a56fa83); routing
+matrix and version-authority checks below.
 
 ## Phase 5 closure note (2026-08-24)
 
@@ -215,9 +220,52 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
 
 ## Next step
 
-**Phase 6 is functionally complete** (see below). Upon user acceptance:
-start **Phase 7 — Employee/User mode**: restricted persona/prompt on the
-same orchestrator and knowledge base (no new subsystems).
+**Phase 7 is functionally complete** (see below). Upon user acceptance:
+start **Phase 8 — Write-capable ERPNext Agent**, the LAST roadmap phase.
+SECURITY.md hard rules apply before any code: staging-only until
+explicitly approved for production, every write needs a confirmation
+step, no silent multi-step actions against live company data.
+
+## Phase 7 — Employee/User mode: what changed
+
+- **Same orchestrator, restricted persona** (`orchestrator.handle_question`
+  gains `mode`): no new subsystem, exactly as ROADMAP.md prescribes.
+- **Least privilege by route**:
+  - `code` agent -> DENIED for employees (polite out-of-scope message,
+    `route_how` marked `+denied`); developers unaffected.
+  - `erpnext` schema introspection -> DENIED; document/list lookups stay
+    available (employees ask about their data, not metadata).
+  - `rag` -> public-docs-only retrieval (company engineering corpus is
+    developer material), answered with the plain-language desk-user
+    persona: UI steps via awesomebar/lists/buttons, explicit rule to say
+    "contact an administrator" instead of guessing at admin tasks.
+- **`POST /orchestrate`** gains `mode` ("developer" default | "employee"),
+  echoed in responses; unknown modes refuse.
+- Generator carries two personas (`rag.generator.PERSONAS`); version
+  authority still injected on both.
+
+## Phase 7 verification (live POST /orchestrate)
+
+| Probe | Result |
+|---|---|
+| E1 how-to as employee | "How do I create a Sales Invoice?" -> plain UI steps cited from public Sales Invoice docs, conf=high |
+| E2 code question as employee | pathsafe question -> DENIED, "needs developer access... ask your administrator", route_how=heuristic+denied |
+| E3 schema as employee | "What fields does Customer have?" -> denied with redirect hint toward document/list questions |
+| E4 live list as employee | "How many roles are set up?" -> high, "20 roles ... [1]" from the real instance |
+| Developer control | SAME Customer-fields question in developer mode -> full 87-field schema answer, unchanged |
+
+## Phase 7 DoD status (self-defined; no dedicated spec doc — ROADMAP.md
+## defines this phase as "restricted persona/prompt on the same
+## orchestrator and knowledge base")
+
+- [x] Restricted persona live (plain-language desk-user prompt, separate
+      from the developer persona)
+- [x] Least-privilege tool access enforced (code agent + schema denied;
+      document/list allowed) — unit-tested AND live-verified
+- [x] Knowledge-base restriction verified (employee RAG searches public
+      docs only — asserted include_company=False in unit test)
+- [x] Developer mode provably unchanged (live control probe)
+- [x] progress/CURRENT.md updated (this document)
 
 ## Phase 6 — Orchestrator/router: what changed
 

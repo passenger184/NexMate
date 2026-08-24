@@ -174,6 +174,7 @@ class OrchestrateRequest(BaseModel):
     question: str = Field(min_length=3, max_length=2000)
     session_id: str | None = Field(
         None, pattern=r"[A-Za-z0-9_-]{1,64}")
+    mode: Literal["developer", "employee"] = "developer"
 
 
 class OrchestrateSource(BaseModel):
@@ -190,7 +191,8 @@ class OrchestrateResponse(BaseModel):
     sources: list[OrchestrateSource]
     confidence: Literal["high", "low", "no_match"]
     route: Literal["erpnext", "code", "rag"]
-    route_how: Literal["heuristic", "classifier", "default"]
+    route_how: str
+    mode: Literal["developer", "employee"]
     version_info: dict
     session_id: str | None = None
     turn_count: int | None = None
@@ -488,7 +490,7 @@ def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
             search_question = candidate
 
     result = orchestrator.handle_question(
-        search_question, req.session_id, history)
+        search_question, req.session_id, history, mode=req.mode)
 
     turn_count: int | None = None
     if req.session_id:
@@ -522,6 +524,7 @@ def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
         confidence=result["confidence"],
         route=result["route"],
         route_how=result["route_how"],
+        mode=req.mode,
         version_info=orchestrator.get_instance_versions(),
         session_id=req.session_id,
         turn_count=turn_count,

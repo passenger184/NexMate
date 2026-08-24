@@ -32,6 +32,12 @@ from tools import erpnext, explain
 
 NO_ANSWER = "I don't have a confident answer for this in the knowledge base."
 
+EMPLOYEE_OUT_OF_SCOPE = (
+    "That question needs developer access to this project's source code, "
+    "which isn't available in employee mode. Please ask your "
+    "administrator or developer team."
+)
+
 _ROUTES = ("erpnext", "code", "rag")
 
 # --- version awareness ---------------------------------------------------------
@@ -196,8 +202,10 @@ def _extract_erpnext_request(question: str) -> dict[str, Any]:
     return _validate(_parse(generator._complete(messages)))
 
 
-def run_erpnext_branch(question: str) -> dict[str, Any]:
-    request = _extract_erpnext_request(question)
+def run_erpnext_branch(question: str,
+                       preextracted: dict[str, Any] | None = None
+                       ) -> dict[str, Any]:
+    request = preextracted or _extract_erpnext_request(question)
     op = request["op"]
     doctype = request["doctype"]
     if op == "schema":
@@ -272,11 +280,29 @@ def handle_question(
     question: str,
     session_id: str | None = None,
     history: list[dict[str, str]] | None = None,
+    mode: str = "developer",
 ) -> dict[str, Any]:
-    """Route + execute + generate. Mirrors /ask's safety semantics."""
+    """Route + execute + generate. Mirrors /ask's safety semantics.
+
+    mode="employee" (Phase 7) restricts the SAME orchestrator: no code
+    agent, no schema introspection, public-docs-only retrieval with the
+    plain-language desk-user persona (least privilege per SECURITY.md).
+    """
     route, how = decide_route(question)
+    if mode not in ("developer", "employee"):
+        return {"answer": f"Unknown mode {mode!r}.", "sources": [],
+                "confidence": "low", "route": route, "route_how": how}
 
     if route == "code":
+        if mode == "employee":
+            # Least privilege: the code agent is developer-only.
+            return {
+                "answer": EMPLOYEE_OUT_OF_SCOPE,
+                "sources": [],
+                "confidence": "low",
+                "route": route,
+                "route_how": how + "+denied",
+            }
         result = explain.locate_and_explain(question)
         if result.get("located"):
             # explain sources are {path,line_start,line_end}; map to the
@@ -305,42 +331,59 @@ def handle_question(
 
     if route == "erpnext":
         try:
-            out = run_erpnext_branch(question)
+            request = _extract_erpnext_request(question)
+            if mode == "employee" and request.get("op") == "schema":
+                # Schema introspection is developer territory; employees
+                # get document/list lookups only.
+                out = {
+                    "answer": (
+                        "DocType schemas are a developer/administrator "
+                        "view and aren't available in employee mode. If "
+                        "you need a document or a list (for example your "
+                        "open orders), just ask for that instead."
+                    ),
+                    "sources": [], "confidence": "low",
+                    "route_meta": {"op": request.get("op"),
+                                   "doctype": request.get("doctype")},
+                }
+            else:
+                out = run_erpnext_branch(
+                    question, preextracted=request)
         except (erpnext.ErpnextUnavailable, erpnext.ErpnextApiError,
                 ValueError, json.JSONDecodeError) as exc:
-            return {
+            out = {
                 "answer": (
                     f"Could not complete the live-instance lookup: {exc}"
                 ),
-                "sources": [],
-                "confidence": "low",
-                "route": route,
-                "route_how": how,
+                "sources": [], "confidence": "low",
             }
         out.update({"route": route, "route_how": how})
         return out
 
     # RAG branch — same gates as /ask (only "high" generates). Company
-    # material joins retrieval ONLY for project-scoped questions: generic
-    # how-tos must be answered from public docs, or our own meta-docs
-    # (which quote eval questions verbatim) hijack the ranking.
+    # material joins retrieval ONLY for project-scoped questions in
+    # DEVELOPER mode; employees always get public docs only, answered
+    # with the plain-language persona.
     lowered = question.lower()
-    scoped = any(h in lowered for h in config.PROJECT_SCOPE_HINTS)
+    scoped = (mode == "developer") and any(
+        h in lowered for h in config.PROJECT_SCOPE_HINTS)
     chunks = retriever.retrieve(question, include_company=scoped)
     confidence = retriever.classify_confidence(chunks, question)
     if confidence != "high":
+        sources = [] if confidence == "no_match" else [
+            {"title": c["title"], "section": c["section"],
+             "url_or_path": c["url_or_path"]} for c in chunks]
         return {
             "answer": NO_ANSWER,
-            "sources": [] if confidence == "no_match" else [
-                {"title": c["title"], "section": c["section"],
-                 "url_or_path": c["url_or_path"]} for c in chunks],
+            "sources": sources,
             "confidence": confidence,
             "route": route,
             "route_how": how,
         }
     history = history or []
     answer = generator.generate_answer(
-        question, chunks, history, extra_system=version_preamble())
+        question, chunks, history,
+        extra_system=version_preamble(), persona=mode)
     return {
         "answer": answer,
         "sources": [

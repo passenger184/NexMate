@@ -59,12 +59,37 @@ question concerns this project's actual behavior, those passages are the \
 authoritative source and take precedence over generic framework docs."""
 
 
+EMPLOYEE_SYSTEM_PROMPT = """You are the built-in help assistant inside \
+ERPNext, talking to a regular desk user (employee) - NOT a developer.
+
+Rules you must follow:
+1. Answer ONLY from the numbered context passages. Never invent menu \
+names, buttons, field names, or behaviors the passages don't mention.
+2. Write plain-language steps a desk user can follow in the browser UI \
+(awesomebar search, list views, form buttons). Do NOT include code, \
+hooks, Python/JavaScript, API calls, or developer customization topics - \
+those are out of scope for this user.
+3. Cite supporting passages inline like [1] or [2][3]; an answer with \
+zero [n] markers is invalid.
+4. If the passages do not cover the question, reply exactly: "I don't \
+have a confident answer for this in the knowledge base." For questions \
+that need developer/administrator rights or customizations, say that \
+plainly and suggest contacting an administrator instead of guessing.
+5. Keep answers short and friendly. Never output image markdown."""
+
+
 def _passage_label(source_type: str) -> str:
     return {
         "our_code": "project code",
         "company_doc": "project docs",
         "resolved_issue": "past fix in this project",
     }.get(source_type, "framework docs")
+
+
+PERSONAS = {
+    "developer": SYSTEM_PROMPT,
+    "employee": EMPLOYEE_SYSTEM_PROMPT,
+}
 
 
 CONDENSE_PROMPT = """Rewrite the user's follow-up question as ONE short \
@@ -171,20 +196,22 @@ def generate_answer(
     chunks: list[dict[str, Any]],
     history: list[dict[str, str]] | None = None,
     extra_system: str = "",
+    persona: str = "developer",
 ) -> str:
     """Generate an answer grounded in the retrieved chunks.
 
     `history` carries prior turns of the same session (Phase 4 session
-    continuity) and is inserted before the current question; grounding
-    rules still apply to the ANSWER only — retrieval is per-turn.
-    `extra_system` appends caller-side rules to the system prompt (used by
-    the Phase 6 orchestrator to inject live instance-version authority).
+    continuity); `extra_system` appends caller-side rules (orchestrator
+    version authority); `persona` selects the base system prompt
+    ("developer" default, "employee" for Phase 7 restricted mode).
 
     Raises on any provider failure — fail loud, never fall back to
     answering without context.
     """
     if not chunks:
         return "I don't have a confident answer for this in the knowledge base."
+    if persona not in PERSONAS:
+        raise ValueError(f"unknown persona {persona!r}")
 
     passages = "\n\n".join(
         f"[{i + 1}] ({c['title']} — {c['section']}; "
@@ -192,7 +219,8 @@ def generate_answer(
         for i, c in enumerate(chunks)
     )
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": SYSTEM_PROMPT + extra_system}
+        {"role": "system",
+         "content": PERSONAS[persona] + extra_system}
     ]
     for turn in history or []:
         role = "user" if turn["role"] == "user" else "assistant"

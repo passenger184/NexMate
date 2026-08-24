@@ -373,3 +373,24 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
 - Live matrix: erpnext schema + honest-zero count + code walkthrough with
   line spans + rag generic/scoped split + misroute guard all PASS; versions
   live in every response.
+
+## [2026-08-24] — session 11: Phase 7 (Employee/User mode)
+
+- Mode implemented as a parameter on the SAME orchestrator
+  (handle_question gains mode), not a parallel pipeline — per ROADMAP's
+  "restricted persona/prompt on the same orchestrator and knowledge base".
+- Least-privilege mapping: code agent fully denied (route_how gets
+  "+denied" suffix so the UI can badge it); erpnext schema op denied but
+  document/list kept (employees ask about their DATA); rag retrieval
+  forced include_company=False (internal engineering docs are developer
+  material) + EMPLOYEE_SYSTEM_PROMPT: plain UI steps, no code identifiers,
+  explicit contact-an administrator fallback, grounded+cited like the dev
+  persona. Unknown modes refuse loudly.
+- Subtle implementation choice: schema denial happens AFTER extraction so
+  the refusal can name the actual DocType and redirect toward document/
+  list phrasing; run_erpnext_branch gained preextracted param to avoid
+  double LLM extraction calls.
+- Live matrix: E1 public-docs how-to (Sales Invoice steps cited), E2 code
+  denial, E3 schema denial with redirect, E4 live count "20 roles... [1]"
+  (no filter -> total roles; earlier 10 was disabled=0 — consistent),
+  developer control unchanged (87-field Customer answer).

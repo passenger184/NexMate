@@ -6,6 +6,11 @@ part of completing meaningful units of work — not just at phase end.
 ## [Unreleased]
 
 ### Added
+- Phase 7 Employee/User mode: `POST /orchestrate` accepts
+  mode=developer|employee; employees get a plain-language desk-user
+  persona over public docs only, the code agent and DocType-schema
+  lookups are denied with actionable messages, live document/list
+  lookups stay available; developer mode provably unchanged.
 - Phase 6 Orchestrator: `POST /orchestrate` routes between RAG, the code
   agent, and the live ERPNext tool (deterministic hints -> LLM classifier
   -> rag default); live instance versions (Frappe 16.31.0 / ERPNext
