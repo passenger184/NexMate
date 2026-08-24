@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ERPNext AI Copilot — UI preview</title>
+  <link rel="stylesheet" href="/assets/erpnext_ai_copilot/css/copilot.css"
+        onerror="this.href='css/copilot.css'">
+  <!-- When served by the FastAPI service at /ui/, the relative path above
+       resolves to this directory's own css. Inside a Frappe bench, the
+       /assets path is produced by `bench build` and is authoritative. -->
+  <script>window.COPILOT_API_BASE = window.COPILOT_API_BASE || "";</script>
+</head>
+<body style="margin:0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#eef1f4;">
+  <div style="max-width:760px;margin:40px auto;padding:0 16px;color:#1f2733;">
+    <h2>ERPNext AI Copilot — standalone UI preview</h2>
+    <p>
+      This page loads the same sidebar bundle a Frappe bench would inject.
+      It talks to the FastAPI service directly. Click the <strong>AI</strong>
+      button in the bottom-right corner to open the panel.
+    </p>
+    <p style="color:#6b7280;font-size:14px;">
+      In a real ERPNext desk this page does not exist — the bundle is loaded
+      via <code>app_include_js</code> and reads its API base from
+      <code>frappe.boot.copilot_settings</code>.
+    </p>
+  </div>
+
+  <!-- API base: same origin as this page (the FastAPI service itself).
+       Override before the bundle if you host it elsewhere:
+       window.COPILOT_API_BASE = "http://127.0.0.1:8000"; -->
+  <script>
+    (function () {
+      var here = new URL(".", window.location.href).origin;
+      window.COPILOT_API_BASE = here;
+    })();
+  </script>
+  <script src="js/copilot.bundle.js"></script>
+</body>
+</html>

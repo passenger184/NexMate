@@ -415,3 +415,20 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   reasons, payload keys; update confirmed by read-back through the read
   tool ("Copilot Test Customer (renamed)").
 - Two test Customers remain on staging (clearly labeled); deletable via UI.
+
+## [2026-08-24] — session 13: sidebar rebuilt to UI_SPEC + testable preview
+
+- User asked whether the UI matched docs/UI_SPEC.md and how to test it.
+  Honest answer was no (Phase-1-minimal panel, jQuery-dependent). Rebuilt
+  frappe_app/public/js/copilot.bundle.js dependency-free (~530 lines) and
+  rewrote copilot.css to Frappe-var-with-fallback tokens. Preview page at
+  GET /ui/preview.html (FastAPI StaticFiles mount of frappe_app/public)
+  loads the identical bundle, so everything is browser-testable here.
+- Approval cards bring SECURITY.md's Tier-2 flows INTO the chat: /edit →
+  unified diff card (Approve & Commit / Reject); /newdoc//editdoc → ERPNext
+  write preview cards with env label + reason shown before Approve.
+- Writes-enabled re-proven live post-rebuild: propose returned proposal_id
+  + env=staging WITHOUT applying (no side effects; expires via TTL). The
+  earlier 403 in reports was the pre-enable proof, not current state.
+- node --check caught one real syntax error (over-escaped quotes in a JSX-
+  free template string) before deployment; fixed.

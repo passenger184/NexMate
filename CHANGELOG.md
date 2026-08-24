@@ -6,6 +6,13 @@ part of completing meaningful units of work — not just at phase end.
 ## [Unreleased]
 
 ### Added
+- Sidebar rebuilt to docs/UI_SPEC.md as a dependency-free vanilla-JS
+  bundle: slide-out resizable panel, markdown+code rendering with copy
+  buttons, citation pills, confidence callouts, sessions + start-fresh,
+  developer/employee mode switch, route/version chips, typing & error &
+  empty states, and inline diff/write APPROVAL CARDS (/edit /newdoc
+  /editdoc) plus /read /search /explain. Standalone preview at GET
+  /ui/preview.html makes the full system browser-testable without a bench.
 - Phase 8 Write-capable ERPNext Agent: `tools/erpnext_write.py` +
   `POST /tools/erpnext_write/propose|apply` — flag-gated
   (ERPNEXT_WRITE_ENABLED), Tier-2 confirm flow with exact previews,

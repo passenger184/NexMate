@@ -243,6 +243,14 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="ERPNext AI Copilot — Phase 1", lifespan=_lifespan)
 
+# Standalone UI preview: serves the same bundle a Frappe bench injects,
+# so the sidebar can be exercised without a bench (docs/UI_SPEC.md).
+_ui_dir = config.ROOT_DIR / "frappe_app" / "public"
+if _ui_dir.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/ui", StaticFiles(directory=str(_ui_dir), html=True),
+              name="ui")
+
 # The Frappe desk page calls this service from a different origin (the
 # ERPNext site), so browsers need CORS headers. Origins are configurable
 # for production; the permissive default is acceptable only because the

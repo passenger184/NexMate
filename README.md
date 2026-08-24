@@ -157,6 +157,34 @@ plain-language desk-user persona over public docs only: the code agent and
 DocType-schema lookups are denied, while document/list lookups stay
 available. Sessions work here exactly like on `/ask` (`session_id`).
 
+## Test the UI right now (no bench needed)
+
+The sidebar is served by the FastAPI service itself as a standalone page
+that talks to the same API:
+
+```bash
+uvicorn service.main:app --host 127.0.0.1 --port 8000
+# open in a browser:
+xdg-open http://127.0.0.1:8000/ui/preview.html   # or just type the URL
+```
+
+Click the **AI** button (bottom-right). What you can do:
+
+| You type | What happens |
+|---|---|
+| `How do I create a Sales Invoice?` | RAG answer from public docs with citation pills + confidence badge |
+| `What fields does Customer have?` | routed to your LIVE ERPNext instance (route badge `erpnext`, real schema) |
+| `How does this project chunk documents?` | answered from this repo's own code/docs |
+| `/explain <error description>` | locates the code behind an error in this repo |
+| `/search <pattern>` · `/read <path>` | grep / read tools on this repo |
+| `/edit path :: find :: replace :: reason` | shows a **unified-diff approval card** — Approve & Commit applies it as its own git commit |
+| `/newdoc Customer {"customer_name": "...", "customer_type": "Individual", "customer_group": "Commercial"} :: reason` | shows an **ERPNext write card** — Approve creates the document live (staging!) |
+| `/editdoc Customer <name> {"customer_name": "new"} :: reason` | same flow for updates |
+
+The header switch flips between **developer** and **employee** modes
+(employee = public-docs persona, no code agent, no schema lookups).
+⟲ starts a fresh conversation; sessions survive page reloads.
+
 ## Install the Desk sidebar (Frappe app)
 
 On the machine running your ERPNext bench:

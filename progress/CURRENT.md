@@ -1,8 +1,28 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 12: Phase 8 — Write-capable ERPNext Agent — built, gated, and verified live on staging; ROADMAP COMPLETE)
-**Current phase:** Roadmap complete (Phases 1–8 functionally done; Phase 8 accepted pending user sign-off)
+**Last updated:** 2026-08-24 (session 13: sidebar rebuilt to full docs/UI_SPEC.md spec + standalone /ui preview so the whole system is testable without a bench; writes confirmed ENABLED for staging)
+**Current phase:** Roadmap complete (Phases 1–8 functionally done) — UI now matches UI_SPEC and is testable in-browser
 **Current task:** None in flight.
+
+## Session 13 — UI completion (docs/UI_SPEC.md)
+
+The Phase-1 sidebar was rebuilt as a self-contained vanilla-JS bundle:
+slide-out resizable right panel with header (mode switch developer/
+employee, start-fresh, close), markdown answers with fenced-code copy
+buttons, citation pills that flash their source row, subtle high-
+confidence badge vs prominent amber/red callouts for low/no_match,
+typing indicator, service-unreachable banner, empty state with
+suggestion chips, Enter/Shift+Enter + autofocus, session continuity via
+localStorage + POST /tools/session/reset, route badges and live-version
+footer per answer, and inline APPROVAL CARDS: /edit renders the unified
+diff with Approve&Commit/Reject (Tier-2), /newdoc//editdoc render exact
+ERPNext write previews with the same two-button flow (Tier-2-for-data).
+Slash commands expose every tool (/read /search /explain).
+
+Standalone preview served by the service itself at **GET /ui/preview.html**
+(same bundle a bench injects), so the entire system is testable in a
+browser on this box. Bench-only leftover: verifying injection inside a
+real Desk (`app_include_js` + boot settings).
 
 ## Phase 7 closure note (2026-08-24)
 
