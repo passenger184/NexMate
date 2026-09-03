@@ -207,5 +207,131 @@ class TestLocateAndExplain(GitRepoTestBase):
         self.assertLess(src["line_start"], src["line_end"])
 
 
+class TestLooksLikeError(unittest.TestCase):
+    """The error/general split must fire on reports, not on questions."""
+
+    def test_true_error_reports(self) -> None:
+        for text in (
+            "Traceback (most recent call last): KeyError: 'path'",
+            "KeyError: 'path' when parsing the response",
+            "resolve_in_project raises PathOutsideRootError on symlinks",
+            "deploy fails with 404 after restart",
+            "got the wrong total instead of the expected sum",
+            "regression in fusion ranking after the change",
+            "the worker keeps crashing on startup",
+            "submit does not work for submittable doctypes",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(explain.looks_like_error(text))
+
+    def test_general_questions_are_not_errors(self) -> None:
+        for text in (
+            "what files are inside the project",
+            "where is resolve_in_project implemented",
+            "how does hybrid retrieval fuse BM25 and vector results",
+            "what does the error banner say when nothing is found",
+            "which function implements the BM25 tokenizer",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(explain.looks_like_error(text))
+
+
+class CannedSearchTestBase(unittest.TestCase):
+    """Deterministic retrieval: canned search hits + file contents."""
+
+    CANNED_MATCHES = [{"path": "tools/pathsafe.py", "line_number": 10,
+                       "line": "def resolve_in_project():"}]
+    CANNED_TEXT = ("def resolve_in_project():\n"
+                   "    pass\n")
+
+    def _run_with_canned(self, description):
+        captured = {}
+
+        def fake_search(term):
+            return {"matches": list(self.CANNED_MATCHES),
+                    "total_matches": len(self.CANNED_MATCHES)}
+
+        def fake_complete(messages):
+            captured["messages"] = messages
+            return "See `resolve_in_project` in the excerpt."
+
+        with mock.patch("tools.explain.search.search_project",
+                        side_effect=fake_search), \
+                mock.patch("tools.explain.read_project_file",
+                           return_value={"content": self.CANNED_TEXT}), \
+                mock.patch("tools.explain._complete",
+                           side_effect=fake_complete):
+            result = explain.locate_and_explain(description)
+        return result, captured
+
+
+class TestPromptSelection(CannedSearchTestBase):
+    """Regression test for the fabricated-error-sections bug (Q3/Q9 class).
+
+    A non-error question must never receive the error-explanation template:
+    the system prompt must not premise an error, must forbid invented
+    error/recommendation sections and invented quotations, and the user
+    message must not be labeled a problem description.
+    """
+
+    def test_general_question_uses_code_qa_prompt(self) -> None:
+        result, captured = self._run_with_canned(
+            "what files are inside the project")
+        system_msg = captured["messages"][0]["content"]
+        user_msg = captured["messages"][1]["content"]
+        self.assertEqual(result["kind"], "general")
+        self.assertNotIn("description of an error", system_msg)
+        self.assertIn("did NOT report an error", system_msg)
+        self.assertIn("do NOT add", system_msg)
+        self.assertIn("planning doc", system_msg)
+        self.assertTrue(user_msg.startswith("Question:"))
+        self.assertNotIn("Problem description:", user_msg)
+
+    def test_error_report_uses_error_prompt(self) -> None:
+        result, captured = self._run_with_canned(
+            "KeyError: 'path' when parsing the read_file response")
+        system_msg = captured["messages"][0]["content"]
+        user_msg = captured["messages"][1]["content"]
+        self.assertEqual(result["kind"], "error")
+        self.assertIn("description of an error", system_msg)
+        self.assertTrue(user_msg.startswith("Problem description:"))
+
+    def test_vision_docs_labeled_in_passages(self) -> None:
+        matches = [{"path": "ARCHITECTURE.md", "line_number": 5,
+                    "line": "target architecture"}]
+
+        def fake_search(term):
+            return {"matches": list(matches), "total_matches": 1}
+
+        captured = {}
+
+        def fake_complete(messages):
+            captured["messages"] = messages
+            return "Per `ARCHITECTURE.md` planning."
+
+        with mock.patch("tools.explain.search.search_project",
+                        side_effect=fake_search), \
+                mock.patch("tools.explain.read_project_file",
+                           return_value={"content": "target architecture\n"}), \
+                mock.patch("tools.explain._complete",
+                           side_effect=fake_complete):
+            explain.locate_and_explain("how is the system structured")
+
+        user_msg = captured["messages"][1]["content"]
+        self.assertIn("(planning doc", user_msg)
+
+
+class TestListProjectFiles(GitRepoTestBase):
+    def test_grouped_tree_lists_real_files(self) -> None:
+        with mock.patch("config.PROJECT_ROOT", self.root):
+            tree = search.list_project_files()
+        self.assertIn("app/worker.py", tree["tree"])
+        self.assertIn("app/util.py", tree["groups"]["app"])
+        self.assertEqual(tree["total"], len(tree["groups"]["app"]) +
+                         sum(len(v) for k, v in tree["groups"].items()
+                             if k != "app"))
+        self.assertNotIn("secret.txt", tree["tree"])
+
+
 if __name__ == "__main__":
     unittest.main()

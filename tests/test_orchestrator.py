@@ -157,5 +157,53 @@ class HandleQuestionRouting(unittest.TestCase):
         self.assertEqual(out["confidence"], "low")
 
 
+class LooksLikeListingTest(unittest.TestCase):
+    def test_listing_questions_detected(self) -> None:
+        for text in (
+            "what files are inside the project",
+            "list all files in the repo",
+            "show me the project structure",
+            "which directories exist at the project root",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(orchestrator._looks_like_listing(text))
+
+    def test_non_listing_questions_not_detected(self) -> None:
+        for text in (
+            "why does resolve_in_project raise on symlinks",
+            "show me files that mention RRF_K",
+            "list all API endpoints",
+            "what does the error banner say",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(orchestrator._looks_like_listing(text))
+
+
+class ListingRouteTest(unittest.TestCase):
+    """End-to-end listing answer uses the live index, never the LLM."""
+
+    def test_listing_answers_from_git_index(self) -> None:
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "app").mkdir()
+            (root / "app" / "worker.py").write_text("x = 1\n")
+            subprocess.run(["git", "init", "-q"], cwd=root,
+                           capture_output=True)
+            with mock.patch("config.PROJECT_ROOT", root):
+                out = orchestrator.handle_question(
+                    "what files are inside the project")
+
+        self.assertEqual(out["route"], "code")
+        self.assertEqual(out["confidence"], "high")
+        self.assertIn("app/worker.py", out["answer"])
+        self.assertNotIn("Unexpected Behavior", out["answer"])
+        self.assertNotIn("Recommendations", out["answer"])
+        self.assertEqual(out["sources"][0]["title"], "project file tree")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -23,12 +23,14 @@ Design rules:
 """
 
 import json
+import re
 import time
 from typing import Any
 
 import config
 from rag import generator, retriever
 from tools import erpnext, explain
+from tools import search as code_search
 
 NO_ANSWER = "I don't have a confident answer for this in the knowledge base."
 
@@ -37,6 +39,44 @@ EMPLOYEE_OUT_OF_SCOPE = (
     "which isn't available in employee mode. Please ask your "
     "administrator or developer team."
 )
+
+
+def _looks_like_listing(question: str) -> bool:
+    """True for "what files are in the project"-style directory questions.
+
+    Three independent signals (interrogative + file-target + project
+    scope) keep precision high: "show me files that mention X" has no
+    scope word, "where is Y implemented" has no listing verb, so neither
+    misfires into a directory dump.
+    """
+    t = question.lower()
+    has_what = bool(re.search(
+        r"\b(what|which|list|show|enumerate)\b", t))
+    has_target = bool(re.search(
+        r"\b(files?|directories|folders?|structure|tree|layout)\b", t))
+    has_scope = bool(re.search(
+        r"\b(project|repo|repository|root|codebase|workspace)\b", t))
+    return has_what and has_target and has_scope
+
+
+def _answer_listing(how: str) -> dict[str, Any]:
+    """Deterministic project-tree answer from the live git index."""
+    tree = code_search.list_project_files()
+    return {
+        "answer": (
+            "Files currently in the project (live listing of the "
+            f"repository file index, {tree['total']} files — not a "
+            "description from documentation):\n\n" + tree["tree"]
+        ),
+        "sources": [{
+            "title": "project file tree",
+            "section": "live listing",
+            "url_or_path": ".",
+        }],
+        "confidence": "high",
+        "route": "code",
+        "route_how": how + "+listing",
+    }
 
 _ROUTES = ("erpnext", "code", "rag")
 
@@ -303,6 +343,10 @@ def handle_question(
                 "route": route,
                 "route_how": how + "+denied",
             }
+        if _looks_like_listing(question):
+            # Deterministic answer from the live git index — never let
+            # vision/planning docs stand in for a directory listing.
+            return _answer_listing(how)
         result = explain.locate_and_explain(question)
         if result.get("located"):
             # explain sources are {path,line_start,line_end}; map to the

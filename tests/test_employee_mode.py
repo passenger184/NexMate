@@ -25,6 +25,16 @@ class EmployeeModeTest(unittest.TestCase):
         self.assertEqual(out["confidence"], "low")
         self.assertIn("employee mode", out["answer"])
 
+    def test_listing_still_denied_for_employees(self) -> None:
+        # The deterministic listing shortcut sits BEHIND the employee
+        # denial: least privilege wins over convenience.
+        with mock.patch.object(orchestrator, "decide_route",
+                               return_value=("code", "heuristic")):
+            out = orchestrator.handle_question(
+                "what files are inside the project", mode="employee")
+        self.assertEqual(out["route_how"], "heuristic+denied")
+        self.assertEqual(out["confidence"], "low")
+
     def test_code_route_still_works_for_developers(self) -> None:
         with mock.patch.object(orchestrator, "decide_route",
                                return_value=("code", "heuristic")), \

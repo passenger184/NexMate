@@ -7,6 +7,13 @@ numbered excerpts -> ONE grounded-only LLM call that must cite real
 locations and may honestly say the excerpts don't cover it. Never generic
 ERPNext folklore divorced from this project's actual code.
 
+Since 2026-08-24 the entry point also serves GENERAL questions about the
+project (anything routed `code` that isn't an error report). A
+deterministic classifier picks the prompt: the error template must never
+fire on a non-error input, because the model will otherwise invent an
+"error" section, a diagnosis, and quoted statements to satisfy the
+template (fabrication class of Q3/Q9).
+
 LLM access goes through rag.generator._complete — intentionally THE single
 litellm call site (ARCHITECTURE.md "Generation provider config"); no
 provider logic lives here. The backtick-identifier grounding net is also
@@ -50,11 +57,89 @@ names, functions, or behavior that the excerpts don't show.
 must appear VERBATIM in an excerpt. Reference locations as `path/to/file.py` \
 followed by plain line numbers OUTSIDE the backticks, e.g. `tools/files.py` \
 line 42.
-3. Explain the likely cause in plain prose, walking through the relevant \
+3. Only diagnose the failure the user actually reported. If the description \
+reports no specific failure, do NOT invent one: no "cause of error",
+"unexpected behavior", "recommendations", or "steps to fix/diagnose" \
+sections.
+4. Never present a sentence as a quotation from the project — a comment, \
+error message, log line, or reported developer statement — unless it \
+appears VERBATIM in one of the excerpts.
+5. Explain the likely cause in plain prose, walking through the relevant \
 excerpt logic. If the excerpts genuinely do not contain enough information, \
 say exactly that and describe what WOULD be needed — a wrong guess is worse \
 than an honest gap.
-4. Keep code references exact; quote only short snippets you can see."""
+6. Keep code references exact; quote only short snippets you can see."""
+
+CODE_QA_SYSTEM_PROMPT = """You are a code assistant for THIS project. You \
+are given numbered excerpts of actual project source and documentation, \
+and a developer's question about the project. The user did NOT report an \
+error.
+
+Rules you must follow:
+1. Answer ONLY the question asked, using ONLY the excerpts. Never invent \
+project internals, file names, functions, or behavior that the excerpts \
+don't show.
+2. Every concrete identifier you write — function names, variables, paths — \
+must appear VERBATIM in an excerpt. Reference locations as `path/to/file.py` \
+followed by plain line numbers OUTSIDE the backticks, e.g. `tools/files.py` \
+line 42.
+3. Never frame the answer as error diagnosis: do NOT add "Error", \
+"Unexpected Behavior", "Likely Cause", "Recommendations", "Steps to \
+Fix/Diagnose", or similar sections, and do NOT describe any bug or \
+misbehavior.
+4. Never present a sentence as a quotation from the project — a comment, \
+error message, log line, or reported developer statement — unless it \
+appears VERBATIM in one of the excerpts.
+5. Some excerpts are labeled "planning doc": they state INTENT and roadmaps \
+(ARCHITECTURE.md, ROADMAP.md, future-work notes), NOT current reality. When \
+asked what exists or how something currently works, prefer source code and \
+records of completed work, and explicitly mark anything drawn from planning \
+docs as planned, proposed, or future — never as already built.
+6. If the excerpts genuinely do not contain enough information, say exactly \
+that — a wrong guess is worse than an honest gap."""
+
+# Planning/vision documents: intent and roadmaps, not current state.
+# Excerpts from these get an explicit label so answers can't present
+# target architecture as already-built reality.
+_VISION_DOCS = frozenset({
+    "ARCHITECTURE.md",
+    "ROADMAP.md",
+    "docs/FUTURE_MULTI_WORKSPACE.md",
+})
+
+# Whole-word signals that the user is reporting a failure, not asking a
+# general question. Kept intentionally narrow: over-triggering merely
+# selects the error template (which now refuses to invent unreported
+# errors), under-triggering still gets grounded non-error answers.
+_ERROR_SIGNALS = (
+    "traceback", "stack trace", "raise", "raised", "raises", "raising",
+    "fail", "fails", "failed", "failing", "failure", "broken", "crash",
+    "crashes", "crashed", "crashing", "bug", "wrong", "unexpected",
+    "instead of", "not working", "doesn't work", "does not work",
+    "regression", "misbehav",
+)
+
+
+def looks_like_error(description: str) -> bool:
+    """True if the text reports a failure (vs. asking about the project).
+
+    Matches exception-class names (CamelCase*Error/Exception/Warning),
+    HTTP 4xx/5xx codes, and whole-word failure vocabulary.
+    """
+    text = description.lower()
+    if re.search(r"\b[A-Za-z_][A-Za-z0-9_]*(Error|Exception|Warning)\b",
+                 description):
+        return True
+    if re.search(r"\b[45]\d\d\b", text):
+        return True
+    return any(re.search(r"\b" + re.escape(sig) + r"\b", text)
+               for sig in _ERROR_SIGNALS)
+
+
+def _vision_suffix(rel_path: str) -> str:
+    if rel_path in _VISION_DOCS:
+        return " (planning doc — describes intent, not current state)"
+    return ""
 
 
 def extract_search_terms(description: str) -> list[str]:
@@ -139,7 +224,14 @@ def _excerpt(text_lines: list[str], hit_lines: list[int]) -> tuple[str, int, int
 
 
 def locate_and_explain(description: str) -> dict[str, Any]:
-    """Find the code behind a reported problem and explain the cause."""
+    """Find the code behind a reported problem and explain the cause.
+
+    Also serves general questions about the project routed here: when the
+    input reports no failure, the general code-Q&A prompt is used instead
+    of the error template (which would otherwise fabricate error sections
+    for bugs that were never reported). Returns "kind": "error"|"general".
+    """
+    is_error = looks_like_error(description)
     terms = extract_search_terms(description)
     if not terms:
         return {
@@ -183,7 +275,7 @@ def locate_and_explain(description: str) -> dict[str, Any]:
         )
         passages.append(
             f"[{len(passages) + 1}] (`{rel_path}` lines "
-            f"{start_line}-{end_line})\n{excerpt}"
+            f"{start_line}-{end_line}{_vision_suffix(rel_path)})\n{excerpt}"
         )
         sources.append({
             "path": rel_path,
@@ -191,12 +283,15 @@ def locate_and_explain(description: str) -> dict[str, Any]:
             "line_end": end_line,
         })
 
+    system_prompt = EXPLAIN_SYSTEM_PROMPT if is_error else CODE_QA_SYSTEM_PROMPT
     user_content = (
-        f"Problem description: {description}\n\nCode excerpts:\n"
+        (f"Problem description: {description}"
+         if is_error else f"Question: {description}")
+        + "\n\nCode excerpts:\n"
         + "\n\n".join(passages)
     )
     messages = [
-        {"role": "system", "content": EXPLAIN_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
     ]
     answer = _complete(messages)
@@ -223,4 +318,5 @@ def locate_and_explain(description: str) -> dict[str, Any]:
         "sources": sources,
         "search_terms": terms,
         "total_hits": total_hits,
+        "kind": "error" if is_error else "general",
     }

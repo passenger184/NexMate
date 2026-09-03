@@ -44,6 +44,28 @@ def _list_project_files() -> list[str]:
     return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
+def list_project_files() -> dict[str, Any]:
+    """The actual project tree, grouped by top-level directory.
+
+    Deterministic answer for "what files are inside the project"-style
+    questions: reads the live git index, not documentation about the
+    project, so vision docs can never be mistaken for a directory listing.
+    """
+    files = sorted(_list_project_files())
+    groups: dict[str, list[str]] = {}
+    for rel in files:
+        top = rel.split("/", 1)[0] if "/" in rel else "(root)"
+        groups.setdefault(top, []).append(rel)
+    lines = [f"project root ({len(files)} tracked files):"]
+    for top in sorted(groups):
+        if top == "(root)":
+            lines.extend(f"  {rel}" for rel in groups[top])
+        else:
+            lines.append(f"  {top}/")
+            lines.extend(f"    {rel}" for rel in groups[top])
+    return {"total": len(files), "groups": groups, "tree": "\n".join(lines)}
+
+
 def _compile_query(query: str, ignore_case: bool) -> tuple[re.Pattern, bool]:
     flags = re.IGNORECASE if ignore_case else 0
     try:

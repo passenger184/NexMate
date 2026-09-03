@@ -79,6 +79,19 @@ part of completing meaningful units of work — not just at phase end.
   opencode.json instructions include CHANGELOG.md.
 
 ### Fixed
+- Code-route fabrication: non-error project questions were force-fit into
+  the error-explanation template (invented "Likely Cause"/"Recommendations"
+  sections, quoted developer statements existing nowhere). The code path
+  now classifies error-reports vs general questions
+  (`looks_like_error`), uses a dedicated non-error prompt that forbids
+  invented error sections and non-verbatim quotations, labels planning
+  docs as intent-not-reality, and answers directory questions with a
+  deterministic live listing from the git index.
+- Sidebar error banner contradicted the server: every failure was wrapped
+  in "Can't reach the assistant", even correct application refusals (404
+  missing file, 400 outside-root, 409 dirty tree). HTTP responses now
+  render only the server's message in an amber banner; the connectivity
+  wording is reserved for actual transport failures.
 - README bench-install path typo (`erpnot_ai_copilot`).
 - Module-docstring chunks starving real symbol chunks in per-document
   dedupe (P1 declined despite correct sources); rare-term gate now blocks

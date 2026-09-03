@@ -432,3 +432,46 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   earlier 403 in reports was the pre-enable proof, not current state.
 - node --check caught one real syntax error (over-escaped quotes in a JSX-
   free template string) before deployment; fixed.
+
+## [2026-08-24] — session 14: UI error-banner contradiction fix
+
+- Report: `/read` showed "Can't reach the assistant" AND "No such file…"
+  for one request. Root cause: submit()'s single catch fed every rejection
+  into appendError, which unconditionally prepended connectivity prose —
+  so a correct HTTP 404 application error was wrapped in a false claim
+  that the service was down. Not a double render; one banner, two claims.
+- Fix: post() tags HTTP errors (isServerError+status); appendError takes
+  opts.kind — server errors render a neutral amber banner with ONLY the
+  server's message ("Request failed (HTTP 404). No such file…"); network
+  failures keep the red connectivity banner. Catch passes flag through.
+- Verified with the bundle's actual functions (extracted + node-eval)
+  against real live-service bodies: 404 read, 400 traversal, 422 array
+  all render single coherent messages; TypeError fetch failure and
+  non-Error rejections keep connectivity wording.
+
+## [2026-09-03] — code-route fabrication fix (reported live)
+
+- Report: "what files are inside the project" (route=code) returned
+  architecture-vision prose presented as current reality PLUS invented
+  "Error/Unexpected Behavior" and "Recommendations" sections quoting a
+  "developer mentioned" comment existing nowhere. Reproduced live
+  verbatim before fixing.
+- Root causes: (1) EXPLAIN_SYSTEM_PROMPT asserted every input is an
+  error description — false premise forcing non-error questions into
+  the error template (same class as Q3/Q9); the identifier grounding
+  net cannot catch plain-prose inventions like fake quotations.
+  (2) Retirement gap: no listing capability existed, and nothing marked
+  ARCHITECTURE.md/ROADMAP.md/FUTURE_MULTI_WORKSPACE.md as vision.
+- Fix: deterministic `looks_like_error` classifier selects between the
+  (hardened) error prompt and a new CODE_QA prompt that forbids error
+  framing, invented sections/quotations, and requires vision docs to be
+  labeled planned-not-built; `_VISION_DOCS` suffix in passage headers;
+  `_looks_like_listing` + deterministic `list_project_files` tree answer
+  in the orchestrator code branch (employee denial stays first).
+  Misclassification degrades gracefully both ways by prompt design.
+- Tests: 10 new (classifier true/false, prompt selection incl. the exact
+  reported question, vision label, listing detection + live-index answer,
+  employee listing denial). Full suite 98/98 green.
+- Live re-verified: reported question now returns the real 81-file tree
+  with no vision docs and no error sections; a genuine KeyError report
+  still gets a grounded diagnosis from real excerpts.
