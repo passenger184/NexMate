@@ -272,6 +272,23 @@
     return "HTTP " + status;
   }
 
+  // An HTTP error response means the service was REACHED and declined the
+  // request — that must never be worded as a connectivity failure. Tag it
+  // so appendError can pick the honest banner. Transport failures (fetch
+  // itself throwing) stay untagged and keep the "can't reach" wording.
+  function serverError(status, body) {
+    var err = new Error(humanizeError(status, body));
+    err.isServerError = true;
+    err.status = status;
+    return err;
+  }
+
+  // Pure decision helper (kept testable outside the DOM): does this
+  // rejection describe a server answer, or a missing server?
+  function errorKind(err) {
+    return (err && err.isServerError) ? "server" : "network";
+  }
+
   function post(path, body) {
     return fetch(apiBase() + path, {
       method: "POST",
@@ -281,7 +298,7 @@
       return r.json().catch(function () { return null; })
         .then(function (j) {
           if (!r.ok)
-            throw new Error(humanizeError(r.status, j));
+            throw serverError(r.status, j);
           return j;
         });
     });
@@ -474,19 +491,33 @@
     var run = q.startsWith("/")
       ? handleCommand(q) : askOrchestrate(q);
     Promise.resolve(run).catch(function (err) {
-      appendError(String(err.message || err));
+      appendError(String((err && err.message) || err), {
+        kind: errorKind(err),
+        status: err && err.status,
+      });
     }).finally(function () {
       S.busy = false;
       S.els.sendBtn.disabled = false;
       S.els.input.focus();
     });
   }
-  function appendError(detail) {
+  function appendError(detail, opts) {
+    // One banner, one claim. A server error shows ONLY the server's real
+    // message ("No such file inside the project") — never wrapped in
+    // connectivity prose, which directly contradicts it.
+    opts = opts || {};
     var msgs = S.els.messages;
     var last = msgs.lastElementChild;
-    var html = '<div class="cp-error-banner">Can’t reach the assistant right now. ' +
-      'Is the service running?<span class="cp-error-detail">' + esc(detail) +
-      "</span></div>";
+    var html;
+    if (opts.kind === "server") {
+      html = '<div class="cp-error-banner cp-error-app">' +
+        "<strong>Request failed (HTTP " + esc(String(opts.status || "?")) +
+        ").</strong> " + esc(detail) + "</div>";
+    } else {
+      html = '<div class="cp-error-banner">Can’t reach the assistant right now. ' +
+        'Is the service running?<span class="cp-error-detail">' + esc(detail) +
+        "</span></div>";
+    }
     if (last && last.classList.contains("cp-msg-a")) last.innerHTML = html;
     else msgs.appendChild(el("div", "cp-msg cp-msg-a", html));
     scrollBottom();

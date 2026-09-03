@@ -221,6 +221,12 @@
   color: var(--cp-fg); border-radius: 8px; padding: 8px 10px; font-size: 12.5px;
 }
 .cp-error-detail { display: block; margin-top: 4px; color: var(--cp-muted); font-size: 11px; }
+/* Server answered with an error (e.g. 404/409 refusal): amber, and — unlike
+   the connectivity banner above — never implies the service is down. */
+.cp-error-app {
+  background: color-mix(in srgb, var(--cp-warn) 12%, transparent);
+  border-color: color-mix(in srgb, var(--cp-warn) 45%, transparent);
+}
 .cp-systemnote {
   text-align: center; font-size: 11px; color: var(--cp-muted); margin: 8px 0;
 }
