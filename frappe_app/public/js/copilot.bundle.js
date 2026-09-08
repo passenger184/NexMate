@@ -85,6 +85,76 @@
   }
 
   // ---------- markdown-lite (escape first!) ----------
+  // ---------- markdown lists: indent-aware, nesting-preserving ----------
+  // A line-based block parser (not regex substitution): each item keeps
+  // its indentation level, so nested lists nest instead of flattening
+  // into one list, and blank lines between items don't spawn fillers.
+  function renderLists(text) {
+    var lines = text.split("\n");
+    var out = [];
+    var i = 0;
+    function itemAt(idx) {
+      var m = lines[idx].match(/^([ \t]*)([-*]|\d+[.)])\s+(.*)$/);
+      if (!m) return null;
+      return {
+        indent: m[1].replace(/\t/g, "    ").length,
+        ordered: /^\d/.test(m[2]),
+        content: m[3],
+      };
+    }
+    function parseList(base) {
+      var html = "";
+      var open = null;
+      while (i < lines.length) {
+        var it = itemAt(i);
+        if (!it || it.indent < base) break;
+        if (it.indent > base && open) {
+          // deeper item: nested list inside the currently open <li>
+          html += parseList(it.indent);
+          // The nested call stops at the first blank/non-item line, which
+          // may still belong to THIS list (e.g. a blank line before the
+          // next sibling item). Skip blanks and resume if a sibling (or
+          // deeper) item follows — otherwise the whole parent list dies
+          // here and every top-level item becomes its own restarted list.
+          while (i < lines.length && lines[i].trim() === "") i++;
+          continue;
+        }
+        if (it.indent > base && !open) { base = it.indent; } // defensive
+        var want = it.ordered ? "ol" : "ul";
+        if (open && open !== want) { html += "</li></" + open + ">"; open = null; }
+        if (!open) { html += "<" + want + ">"; open = want; }
+        else { html += "</li>"; }
+        html += "<li>" + it.content;
+        i++;
+        // slurp lines belonging to this item
+        while (i < lines.length) {
+          var ln = lines[i];
+          if (ln.trim() === "") {
+            // blank: stay in the list only if another item follows
+            var j = i + 1;
+            while (j < lines.length && lines[j].trim() === "") j++;
+            var nx = j < lines.length ? itemAt(j) : null;
+            if (nx && nx.indent >= base) { i = j; break; }
+            break;
+          }
+          if (itemAt(i)) break; // next item (same or deeper level)
+          var lead = lines[i].replace(/\t/g, "    ").match(/^ */)[0].length;
+          if (lead > base && lines[i].trim() !== "") {
+            html += "<br>" + lines[i].trim();
+            i++;
+          } else break;
+        }
+      }
+      if (open) html += "</li></" + open + ">";
+      return html;
+    }
+    while (i < lines.length) {
+      var first = itemAt(i);
+      if (first) out.push(parseList(first.indent));
+      else { out.push(lines[i]); i++; }
+    }
+    return out.join("\n");
+  }
   function md(src) {
     var out = esc(src == null ? "" : String(src));
     var blocks = [];
@@ -101,11 +171,8 @@
       .replace(/(^|\W)\*([^*\n]+)\*(?=\W|$)/g, "$1<em>$2</em>")
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,
-               '<a href="$2" target="_blank" rel="noopener">$1</a>')
-      .replace(/^\s*[-*] (.*)$/gm, "<li>$1</li>")
-      .replace(/^\s*\d+\. (.*)$/gm, "<li data-ol='1'>$1</li>");
-    out = out.replace(/(<li(?: data-ol='1')?>[\s\S]*?<\/li>)(?!\s*<li)/g,
-                      function (m) { return m.match(/data-ol/) ? "<ol>" + m + "</ol>" : "<ul>" + m + "</ul>"; });
+               '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    out = renderLists(out);
     out = out.split(/\n{2,}/).map(function (p) {
       p = p.trim();
       if (!p) return "";
@@ -132,69 +199,51 @@
     });
   }
 
-  // ---------- citations ----------
-  function citePills(sources) {
-    if (!sources || !sources.length) return "";
-    return "[" + sources.map(function (_, i) {
-      return '<span class="cp-pill" data-src="' + i + '">' + (i + 1) + "</span>";
-    }).join("") + "]";
-  }
-  function sourceLabel(s) {
-    var bits = [];
-    if (s.title) bits.push(esc(s.title));
-    if (s.section && s.section !== "(top)") bits.push(esc(s.section));
-    if (s.source_type === "resolved_issue") bits.push("past fix");
-    if (typeof s.line_start === "number")
-      bits.push("lines " + s.line_start + "-" + s.line_end);
-    return bits.join(" · ");
-  }
-  function renderSources(container, sources) {
+  // ---------- citations: `[n] path` pills directly under the answer ----------
+  function renderPills(container, sources) {
     if (!sources || !sources.length) { container.style.display = "none"; return; }
     container.style.display = "";
-    var list = el("div", "cp-sources-list");
     sources.forEach(function (s, i) {
-      var row = el("div", "cp-source-row",
-        '<span class="cp-pill cp-pill-static">' + (i + 1) + "</span> " +
-        sourceLabel(s));
+      var detail = [
+        s.title,
+        (s.section && s.section !== "(top)") ? s.section : null,
+        (typeof s.line_start === "number")
+          ? ("lines " + s.line_start + "-" + s.line_end) : null,
+        s.source_type === "resolved_issue" ? "past fix" : null,
+      ].filter(Boolean).join(", ");
+      var pill;
       if (s.url_or_path && /^https?:/.test(s.url_or_path)) {
-        row.appendChild(el("a", "cp-source-link", "open"))
-          .href = s.url_or_path;
-        row.lastChild.target = "_blank";
-        row.lastChild.rel = "noopener";
+        pill = el("a", "cp-pill");
+        pill.href = s.url_or_path;
+        pill.target = "_blank";
+        pill.rel = "noopener";
+      } else {
+        pill = el("span", "cp-pill");
       }
-      list.appendChild(row);
-    });
-    container.innerHTML = "";
-    container.appendChild(el("div", "cp-sources-title", "Sources"));
-    container.appendChild(list);
-  }
-  function bindPills(msgEl, sources) {
-    msgEl.querySelectorAll(".cp-pill[data-src]").forEach(function (pill) {
-      pill.addEventListener("click", function () {
-        var box = msgEl.querySelector(".cp-sources");
-        if (!box) return;
-        box.style.display = "box.style.display" === "x" ? "" : (
-          box.style.display === "none" || !box.style.display ? "" : "none");
-        var idx = Number(pill.getAttribute("data-src"));
-        var rows = box.querySelectorAll(".cp-source-row");
-        rows.forEach(function (r, j) {
-          r.classList.toggle("cp-flash", j === idx);
-        });
-        box.scrollIntoView({ block: "nearest" });
-      });
+      if (detail) pill.title = detail;
+      pill.innerHTML = "[" + (i + 1) + "] " +
+        '<span class="cp-pill-path">' +
+        esc(s.title || s.url_or_path || "") + "</span>";
+      container.appendChild(pill);
+      container.appendChild(document.createTextNode(" "));
     });
   }
 
-  // ---------- diff rendering ----------
+  // ---------- diff rendering: terminal view, gutter per line ----------
   function renderDiff(diffText) {
     var wrap = el("div", "cp-diff");
     diffText.split("\n").forEach(function (line) {
-      var cls = "";
+      var cls = "", mark = " ";
       if (/^\+\+\+|^---|^diff /.test(line)) cls = "cp-diff-file";
       else if (line.startsWith("@@")) cls = "cp-diff-hunk";
-      else if (line.startsWith("+")) cls = "cp-diff-add";
-      else if (line.startsWith("-")) cls = "cp-diff-del";
-      wrap.appendChild(el("div", "cp-diff-line " + cls, esc(line) || " "));
+      else if (line.startsWith("+")) { cls = "cp-diff-add"; mark = "+"; }
+      else if (line.startsWith("-")) { cls = "cp-diff-del"; mark = "-"; }
+      var row = el("div", "cp-diff-line " + cls);
+      var gutter = el("span", "cp-gutter");
+      gutter.textContent = mark;
+      row.appendChild(gutter);
+      row.appendChild(document.createTextNode(line || " "));
+      wrap.appendChild(row);
     });
     return wrap;
   }
@@ -216,41 +265,37 @@
   function fillAssistant(m, html, meta) {
     meta = meta || {};
     m.innerHTML = "";
-    var head = el("div", "cp-meta-row");
-    var confCls = { high: "cp-conf-high", low: "cp-conf-low",
-                    no_match: "cp-conf-nomatch" }[meta.confidence] || "cp-conf-low";
-    var confTxt = { high: "✓ high confidence", low: "⚠ low confidence",
-                    no_match: "✖ no confident answer" }[meta.confidence] ||
-                   esc(meta.confidence);
-    head.appendChild(el("span", "cp-badge " + confCls, confTxt));
-    if (meta.route) {
-      head.appendChild(el("span", "cp-route", esc(meta.route) +
-        (meta.route_how ? " · " + esc(meta.route_how) : "")));
-    }
-    m.appendChild(head);
-
-    if (meta.confidence && meta.confidence !== "high") {
-      m.appendChild(el("div", "cp-callout " +
-        (meta.confidence === "no_match" ? "cp-callout-red" : "cp-callout-amber"),
-        meta.confidence === "no_match"
-          ? "The knowledge base has nothing relevant to this question."
-          : "This answer was withheld — retrieval wasn't confident enough. Nearest sources are shown below."));
-    }
     var body = el("div", "cp-answer", html);
     m.appendChild(body);
     bindCopyButtons(body);
 
-    var srcBox = el("div", "cp-sources");
-    m.appendChild(srcBox);
-    renderSources(srcBox, meta.sources);
+    var pills = el("div", "cp-pills");
+    m.appendChild(pills);
+    renderPills(pills, meta.sources);
+    m.appendChild(confidenceRow(meta.confidence, meta.route, meta.route_how));
 
     if (meta.versions && meta.versions.status === "live") {
       m.appendChild(el("div", "cp-versionline",
-        "live: Frappe " + esc(meta.versions.frappe) + " · ERPNext " +
+        "live: Frappe " + esc(meta.versions.frappe) + ", ERPNext " +
         esc(meta.versions.erpnext)));
     }
-    bindPills(m, meta.sources);
     scrollBottom();
+  }
+  function confidenceRow(confidence, route, routeHow) {
+    var ok = confidence === "high";
+    var icon = ok ? "✓" : "⚠";
+    var label = ok ? "high confidence" :
+      (confidence === "no_match" ? "no confident answer" : "low confidence");
+    var cls = "cp-conf " + (ok ? "cp-conf-high" :
+      (confidence === "no_match" ? "cp-conf-nomatch" : "cp-conf-low"));
+    var row = el("div", "cp-meta-row");
+    row.appendChild(el("span", cls,
+      '<span class="cp-check">' + icon + "</span>" + esc(label)));
+    if (route) {
+      row.appendChild(el("span", "cp-route", ", via " + esc(route) +
+        (routeHow ? " (" + esc(routeHow) + ")" : "")));
+    }
+    return row;
   }
   function scrollBottom() {
     S.els.messages.scrollTop = S.els.messages.scrollHeight;
@@ -312,7 +357,8 @@
       if (r.session_id) S.sessionId = r.session_id;
       fillAssistant(m, md(r.answer), {
         confidence: r.confidence,
-        route: r.route + (r.route_how ? " (" + r.route_how + ")" : ""),
+        route: r.route,
+        route_how: r.route_how,
         sources: r.sources,
         versions: r.version_info,
       });
@@ -379,8 +425,8 @@
       if (!m2)
         return fillAssistant(m, "Usage: <code>" + cmd +
           " Doctype [name] {\"json\": \"payload\"} :: reason</code>");
-      var dt = m2[1], nm = (cmd === "/editdoc" ? m2[2] : ""),
-          js = m2[cmd === "/editdoc" ? 3 : 2], rs = m2[4];
+      var dt = m2[1], nm = (cmd === "/editdoc" ? (m2[2] || "") : ""),
+          js = m2[3], rs = m2[4];
       var payload;
       try { payload = JSON.parse(js); }
       catch (e) { return fillAssistant(m, "Payload is not valid JSON."); }
@@ -403,6 +449,7 @@
       ok.textContent = "Applying…";
       post(applySpec.path, applySpec.body).then(function (r) {
         card.classList.add("cp-applied");
+        card.classList.add("cp-sweep");
         bar.innerHTML = "";
         bar.appendChild(el("span", "cp-committed",
           "✓ committed as <code>" + esc(r.commit_hash || r.name || "?") +
@@ -425,7 +472,7 @@
   function renderEditCard(m, proposal) {
     var card = el("div", "cp-card");
     card.appendChild(el("div", "cp-card-title",
-      "Proposed change — <code>" + esc(proposal.path) + "</code>"));
+      "Proposed fix — <code>" + esc(proposal.path) + "</code>"));
     card.appendChild(renderDiff(proposal.diff));
     approveBar(card, {
       path: "/tools/apply_edit",
@@ -435,7 +482,7 @@
     });
     m.innerHTML = "";
     m.appendChild(el("div", "cp-meta-row",
-      '<span class="cp-route">edit proposal · one-shot, expires in ' +
+      '<span class="cp-route">edit proposal, one-shot, expires in ' +
       proposal.expires_minutes + ' min</span>'));
     m.appendChild(card);
     scrollBottom();
@@ -450,8 +497,8 @@
   function renderWriteCard(m, proposal) {
     var card = el("div", "cp-card");
     card.appendChild(el("div", "cp-card-title",
-      "Proposed " + esc(proposal.action.toUpperCase()) +
-      " on live ERPNext — <code>" + esc(proposal.doctype) +
+      "Proposed <code>" + esc(String(proposal.action).toLowerCase()) +
+      "</code> on live ERPNext — <code>" + esc(proposal.doctype) +
       (proposal.name ? "/" + esc(proposal.name) : "") + "</code>" +
       ' <span class="cp-envlabel">' + esc(proposal.env_label) + "</span>"));
     card.appendChild(el("pre", "cp-writepreview",
@@ -464,7 +511,7 @@
     });
     m.innerHTML = "";
     m.appendChild(el("div", "cp-meta-row",
-      '<span class="cp-route">erpnext write · one-shot, expires in ' +
+      '<span class="cp-route">erpnext write, one-shot, expires in ' +
       proposal.expires_minutes + ' min</span>'));
     m.appendChild(card);
     scrollBottom();
@@ -474,10 +521,9 @@
   function submit() {
     var q = S.els.input.value.trim();
     if (!q || S.busy) return;
-    if (q.length < 3 && !q.startsWith("/")) {
-      systemNote("Please type at least 3 characters.");
-      return;
-    }
+    // Transport validity only: non-empty input always goes through.
+    // Short messages ("hi", "ok", "why") are conversationally valid —
+    // the router, not a character count, decides what they mean.
     if (q.startsWith("/") && q.trim().split(/\s+/).length === 1 &&
         ["/read", "/search", "/explain"].indexOf(q.toLowerCase()) !== -1) {
       systemNote(q + " needs an argument, e.g. " + q + " <something>");
@@ -557,11 +603,11 @@
     loadState();
     var wrap = el("div"); wrap.id = "cp-root";
     wrap.innerHTML =
-      '<button id="cp-toggle" title="AI Copilot">AI</button>' +
+      '<button id="cp-toggle" title="NexMate">AI</button>' +
       '<div id="cp-panel" class="cp-closed" role="dialog" aria-label="AI assistant">' +
       '  <div id="cp-header">' +
       '    <span class="cp-logo">AI</span>' +
-      '    <span class="cp-title">ERPNext Copilot</span>' +
+      '    <span class="cp-title">NexMate</span>' +
       '    <select id="cp-mode" title="Mode">' +
       '      <option value="developer">developer</option>' +
       '      <option value="employee">employee</option>' +
@@ -573,7 +619,9 @@
       '  <div id="cp-messages"></div>' +
       '  <div id="cp-inputrow">' +
       '    <textarea id="cp-input" rows="1" placeholder="Ask, or / for tools…"></textarea>' +
-      '    <button id="cp-send">Send</button>' +
+      '    <button id="cp-send" title="Send" aria-label="Send">' +
+      '      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 21 3l-7.5 18-2.3-7.2z" fill="currentColor"/></svg>' +
+      "    </button>" +
       "  </div>" +
       "</div>";
     document.body.appendChild(wrap);
@@ -626,7 +674,17 @@
   }
 
   function systemNote(text) {
-    S.els.messages.appendChild(el("div", "cp-systemnote", esc(text)));
+    // Dedupe: validation guards return early without clearing the input,
+    // so repeats (held Enter, double taps) would otherwise stack the
+    // identical note once per invocation. Consecutive duplicates collapse.
+    var msgs = S.els.messages;
+    var last = msgs.lastElementChild;
+    if (last && last.classList.contains("cp-systemnote") &&
+        last.textContent === text) {
+      scrollBottom();
+      return;
+    }
+    msgs.appendChild(el("div", "cp-systemnote", esc(text)));
     scrollBottom();
   }
 

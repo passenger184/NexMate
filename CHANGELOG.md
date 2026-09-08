@@ -6,6 +6,26 @@ part of completing meaningful units of work — not just at phase end.
 ## [Unreleased]
 
 ### Added
+- NexPilot conversational orchestration (in progress, uncommitted):
+  Layer-1 exact fast-path for canonical greetings/acks/help (zero model
+  calls) + Layer-2 NLU understanding (greeting/capability/troubleshoot/
+  clarify/out_of_scope/task) before any tool runs; single authoritative
+  capability registry (`capabilities.py`) behind "what can you do?";
+  targeted clarification for ambiguous input; polite out-of-scope
+  boundary; troubleshoot reuses error-text→code path or asks for the
+  traceback; thin follow-ups ("why?") retrieve anchored on the NLU
+  topic; NLU failure degrades to heuristic-only routing or safe
+  clarification (never blind RAG); NLU calls run on a short fail-fast
+  budget (`NLU_TIMEOUT_SECONDS`, default 20s, no transport retry).
+  Evaluation: 29-case routing dataset (`evaluation/routing_cases.json`)
+  + wiring harness, 133 Python tests + 26 node checks green.
+  Live NLU verification still blocked (generation provider unreachable
+  from this box).
+- Sidebar restyled to docs/UI_VISUAL_SPEC.md: ink-navy instrument-panel
+  surfaces with hairline borders, amber single accent, teal reserved for
+  trust and rust for caution, status-LED confidence signals, terminal
+  diff with colored gutters, muted monospace citation paths, approve
+  color-sweep, and prefers-reduced-motion support.
 - Sidebar rebuilt to docs/UI_SPEC.md as a dependency-free vanilla-JS
   bundle: slide-out resizable panel, markdown+code rendering with copy
   buttons, citation pills, confidence callouts, sessions + start-fresh,
@@ -72,6 +92,17 @@ part of completing meaningful units of work — not just at phase end.
 - `PROJECT_ROOT`, `MAX_READ_FILE_BYTES`, and proposal-TTL configuration.
 
 ### Changed
+- Product renamed to NexMate ("Your ERPNext AI Companion") across all
+  UI-facing surfaces: sidebar header, greeting text, preview page title,
+  README, and service title. Code identifiers and history untouched.
+  `#2E6FF2` accent (user bubble, send arrow icon, focus rings), neutral
+  toggle/header/dropdown, `[n] path` citation pills with monospace paths,
+  quiet inline confidence row below the pills (callout banners removed),
+  terminal diff with colored gutters, white-fill Approve + ghost Reject,
+  muted "Proposed fix" card headers. Removed: orange Send button, blue
+  dropdown fill, shadows, uppercase-tracked labels, middle-dot joins.
+- Fixed `/newdoc` parsing its JSON from the wrong regex group (every
+  /newdoc failed with "Payload is not valid JSON").
 - Doc-set audit: AGENTS.md read-order numbering + phase-agnostic phase
   references + ADR location; EVALUATION.md Phase-1 DoD ticked to verified
   reality; UI_SPEC.md dead reference fixed; SECURITY.md current-phase
@@ -79,6 +110,17 @@ part of completing meaningful units of work — not just at phase end.
   opencode.json instructions include CHANGELOG.md.
 
 ### Fixed
+- Live-testing round, five bugs: (1) nested markdown lists flattened into
+  one numbered list with blank fillers — replaced regex substitution with
+  an indent-aware block parser; (2) citations rendered as raw malformed
+  markdown (`[[1]text](url)`) — prompt rule plus deterministic rewrite net
+  enforce bare `[n]` markers, pills render from the structured sources
+  array; (3) short-input validation note firing repeatedly — consecutive
+  identical system notes now collapse; (4) greeting "hey" routed to the
+  live ERPNext tool — deterministic smalltalk path answers greetings with
+  no retrieval/tools/LLM, and document extraction requires a name;
+  (5) session condensation carried the previous topic onto greetings and
+  topic changes — condensation now gated on anaphoric references.
 - Code-route fabrication: non-error project questions were force-fit into
   the error-explanation template (invented "Likely Cause"/"Recommendations"
   sections, quoted developer statements existing nowhere). The code path

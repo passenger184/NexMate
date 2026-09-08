@@ -475,3 +475,196 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
 - Live re-verified: reported question now returns the real 81-file tree
   with no vision docs and no error sections; a genuine KeyError report
   still gets a grounded diagnosis from real excerpts.
+
+## Session 14 — UI visual restyle per docs/UI_VISUAL_SPEC.md
+
+- Self-check restatement: the panel read as a generic SaaS chat widget
+  (white cards, blue accent, pill badges, tracked-out uppercase labels,
+  shadowed toggle/panel, GitHub-green/red diff). Plan was to convert it
+  to an ERP-diagnostic instrument: ink-navy surfaces, hairline borders,
+  amber as the single accent, teal strictly for trust, rust strictly for
+  caution. Audit confirmed the generic defaults present, so the full CSS
+  was rewritten rather than patched.
+- What changed and why: token table from the spec verbatim
+  (--surface-base #12141C etc.); shadows removed (toggle/panel now
+  hairline-bordered); all four uppercase+tracked labels reverted to
+  normal case; pill confidence badges became status LEDs (dot + short
+  label); middle-dot-joined meta strings replaced (route "via rag
+  (heuristic)", comma-joined sources/version); diff view rebuilt as a
+  terminal diff with per-line colored gutters at 12% fills; citations
+  muted with monospace paths; approve button moved to amber (single
+  accent), committed-confirmation stays teal; user bubble flattened to
+  an amber-tint hairline box. Slide-in kept short/decisive; approve
+  commit sweep added; both gated behind prefers-reduced-motion. Kept
+  `font-family: inherit` for Desk-typography matching (spec asks to
+  check what Desk uses — no bench on this box, so inheritance is the
+  honest best-effort); system mono stack lists JetBrains/IBM Plex Mono
+  first with ui-monospace fallback when absent.
+- One deliberate deviation logged: UI_SPEC.md says use Desk's CSS vars
+  and don't hardcode hex; UI_VISUAL_SPEC.md mandates exact dark hexes
+  and explicitly wants the panel to stand apart from Desk's light
+  chrome. Followed UI_VISUAL_SPEC (newer, more specific) for colors.
+- Verification: node --check clean; full avoid-list grep clean; 15/15
+  DOM-harness checks pass against a stub that boots the real bundle
+  (toggle/panel, LED, route/source/version rendering, copy buttons,
+  diff gutters, approve sweep, write-card casing, server-vs-network
+  error banners).
+- Harness caught a REAL pre-existing bug the suite missed: /newdoc
+  parsed its JSON from the wrong regex group (the /editdoc name slot),
+  so every /newdoc failed with "Payload is not valid JSON." Fixed by
+  reading group 3 unconditionally; covered by the new harness check.
+
+## Session 15 — UI rebuild to docs/UI_VISUAL_SPEC_updated.md (literal)
+
+- The updated spec supersedes the amber instrument-panel direction
+  entirely: rebuilt `frappe_app/public/css/copilot.css` to its exact
+  token table (`--panel-bg #15171C` … `--danger #E5484D`), `#2E6FF2` as
+  the only accent (user bubble, send arrow, focus rings). Removed per
+  spec: orange Send button (now icon-only accent arrow SVG), blue
+  mode-dropdown fill (neutral + custom muted chevron), all shadows,
+  all tracked-out uppercase labels, middle-dot-joined meta strings.
+- Structural changes the new spec forced in the bundle: citation pills
+  now read `[n] path` in monospace directly under the answer (separate
+  numbered sources list deleted); confidence is a quiet inline row
+  BELOW the pills (checkmark/success, warning/danger) and the old
+  low/no-match callout boxes are gone; diff card header follows the
+  literal "Proposed fix — <file>" pattern; approve is #F2F3F5/#15171C,
+  reject is ghost, equal-width flex.
+- Judgment calls (low-stakes, spec-silent): toggle button went neutral
+  surface-card circle (accent is restricted to bubble/send/focus, and
+  amber was banned); non-http pills expose section detail via tooltip;
+  write-card keeps its existing content under the same muted header
+  treatment; header title set to the spec's literal "ERPNext copilot"
+  casing. UI_SPEC tap-to-open behavior preserved for http pills.
+- Constraints preventing exact verification: no browser/screenshot
+  tooling on this box, so instead of screenshots — 21 DOM-harness
+  assertions (`/tmp/opencode/ui_smoke.js`, throwaway) booting the real
+  bundle against a stub DOM, all passing; `node --check` clean; served
+  bytes from GET /ui/* verified byte-identical to disk. Desk font
+  matching still best-effort via `font: inherit` (no bench here).
+- Harness caught one REAL pre-existing bug: `/newdoc` read its JSON
+  from the wrong regex capture group, so every /newdoc failed with
+  "Payload is not valid JSON." Fixed (group 3 unconditionally) and
+  covered by a harness check.
+
+## Session 16 — live-testing round, five bugs fixed
+
+- (1) Markdown nested lists flattened into one numbered list with blank
+  filler lines — the old code stripped indentation with `^\s*` regexes and
+  wrapped runs by first-item type. Replaced with an indent-aware block
+  parser (`renderLists` in the bundle): nesting preserved, blank lines
+  tolerated inside lists via lookahead, ordered/unordered runs never
+  mixed, continuation lines join their item.
+- (2) Citations rendered as raw malformed markdown (`[[1]text](url)`).
+  Two-layer fix: SYSTEM_PROMPT + EMPLOYEE_SYSTEM_PROMPT now forbid
+  markdown-link citations (bare [n] only, UI renders pills from the
+  structured sources array), plus a deterministic rewrite net mirroring
+  the identifier-grounding pattern for when the small model slips anyway.
+- (3) Short-input validation note firing repeatedly — consecutive
+  identical system notes now collapse in `systemNote`. (Exact triple-fire
+  trigger not reproduced; the dedupe fixes the symptom class regardless
+  of whether the cause was key auto-repeat or rapid taps, since the guard
+  path never set the busy flag.)
+- (4) Classifier routed "hey" to the ERPNext live-lookup tool. New
+  deterministic greeting short-circuit in `handle_question` answers with
+  no retrieval/tools/LLM (new `smalltalk` route, added to the response
+  contract). Defense in depth: document-op extraction now requires a
+  name, closing the hole where the tool ran with a missing argument.
+- (5) Condensation carried the previous topic onto greetings/topic
+  changes. New `should_condense_followup` gate: condense only with
+  history AND an anaphoric reference AND a non-greeting; wired into both
+  /ask and /orchestrate. Errs toward over-triggering (`just/cite/cited`
+  count) since the condense prompt forbids adding facts.
+- Tests: 15 new Python cases (greetings, anaphora gate incl. the exact
+  reported phrasings, extraction name rule, prompt contract, citation
+  regex shapes); persisted the DOM harness as
+  `frappe_app/public/js/copilot.bundle.test.js` (`node <file>`, exit-code
+  contract) with nested-list + note-dedupe sections. Full run: 113
+  Python green + 25 node checks green.
+- Live-verified all five against the restarted service: smalltalk route
+  for "hey"; "hello" in-session answers as greeting with no Sales
+  leakage; anaphoric control still condenses; answers carry bare [n]
+  markers with zero markdown-link citations.
+
+## Session 17 — NexMate naming pass (per PROJECT.md product name)
+
+- Renamed UI-facing product references from generic placeholders to
+  NexMate: sidebar header + toggle tooltip, smalltalk greeting
+  ("Hey, I'm NexMate! ..."), standalone preview <title>/heading,
+  README title + tagline, FastAPI OpenAPI title. Code identifiers
+  (`copilot_api_base`, `localStorage` keys, app dir), comments, and
+  historical CHANGELOG entries deliberately untouched.
+- Fixed the node harness header check that asserted the old spec casing
+  the rename replaced. Full run: 113 Python green + 25 node checks
+  green; live-verified greeting, preview title, and OpenAPI title.
+
+## Session 18 — NexPilot conversational-redesign continuation (recovery + fixes)
+
+- Recovered the previous session's uncommitted redesign instead of
+  restarting: Layer-1 exact fast-path, Layer-2 NLU classifier (6 kinds),
+  capabilities.py registry, clarify/scope/troubleshoot routes, degraded
+  path, input-validation fix, condense gate, telemetry, 29-case routing
+  dataset + harnesses. Verified each claim against the diff before
+  touching anything; no reverts, no duplicated functionality.
+- Fixed the routing-eval harness (3 real bugs, all in the harness, none
+  in the product): (1) NLU=None cases raised through the mock instead of
+  returning None (the graceful-degradation value); (2) the `_complete`
+  mock forbade calls the erpnext/conversational branches legitimately
+  make — now returns canned text while rag/tools counters measure
+  wiring; (3) mocks were addCleanup-stacked across cases so code-where's
+  scripted decide_route leaked into later cases — now ExitStack-scoped
+  per case. Dataset gained scripted `task_route` for live-balance and
+  code-where (same philosophy as scripted NLU: understanding decisions
+  pinned, wiring measured). Heuristics deliberately NOT broadened —
+  "outstanding balance"/"where is X implemented" as substring hints
+  would be the phrase list the redesign forbids; the live classifier
+  handles them.
+- Genuine product gap found and fixed: thin follow-ups ("why?") ignored
+  the NLU topic at retrieval time. New `_anchor_thin_followup`: task +
+  follows_topic + named topic + <=4 words retrieves as
+  "<topic>: <question>". Self-contained questions untouched, so no
+  contamination (covered by unit tests incl. greeting-after-topic).
+- Live failure found and fixed: with the provider unreachable, NLU hung
+  5+ min in litellm retries, making the degraded path unreachable in
+  practice. `_complete` gained timeout/num_retries params (defaults
+  unchanged for answer generation); NLU uses NLU_TIMEOUT_SECONDS=20 +
+  num_retries=0 (the corrective re-ask is the retry). Worst-case
+  provider-down is now ~40s to honest clarify, not silence.
+- Added ok/okay/got it to the exact ack fast-path (same canonical-token
+  class as existing entries, full-match only — not a phrase list).
+- Verification: 133 Python green (was 128 + 5 failing) + 26 node green.
+  Live on :8001 with Ollama DOWN: hey/hi/bye/thanks/ok instant
+  smalltalk; hii/invoices/why honest clarify/degraded ~40s; blank input
+  clean 422; session invoices->clarify then hey->smalltalk (no
+  contamination); versions live (Frappe 16.31.0 / ERPNext 16.32.3).
+  BLOCKED: full 16-message NLU verification (Ollama at .env address and
+  current nameserver both unreachable; no generation calls possible).
+  Next session with Ollama up: rerun the 16-message matrix live.
+
+## Session 19 — condenser version-echo injection found and fixed
+
+- Injection point (measured, not guessed): turn-1's assistant answer
+  carries the version authority ("...in ERPNext 16.31.0 and 16.32.3").
+  `condense_followup` fed that verbatim into the rewrite context, and
+  the small model copied the phrase into the refined query despite
+  CONDENSE_PROMPT rule 5 forbidding it. Proved with a mocked
+  `_complete` capture: identical echo in context, identical echo in
+  output. Nothing downstream re-adds it — the contamination happens
+  inside the condenser call itself. So the fix is at the injection
+  point, not more prompt wording: `_scrub_version_echoes` strips only
+  the version-number tokens (bare "in ERPNext" stays — it is a useful
+  retrieval keyword), applied to assistant history turns before the
+  context is built AND to the rewritten output as a backstop.
+- `_classify_with_llm` inspected line-by-line: single `messages` build,
+  two `_complete` calls = first attempt + corrective retry (the
+  documented pattern, same as NLU/extractor) — no duplication, no dead
+  validation, no cleanup needed. The earlier claim described code that
+  does not exist in the working tree.
+- Tests: 6 new `VersionEchoScrubTest` cases (digits-only scrub, context
+  hiding, output backstop, history scoping). Full run: 145 Python green
+  + 26 node green.
+- Live probe (fresh session, restarted service with scrub loaded): Q1
+  Sales Invoice how-to -> high (Sales Invoice docs); Q2 "what about
+  Purchase Invoices?" -> refined "How do I create a Purchase Invoice in
+  ERPNext?" -> high, Purchase Invoice docs, correct PO/supplier steps.
+  Telemetry confirms no digit tokens in the refined query.

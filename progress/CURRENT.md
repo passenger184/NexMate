@@ -1,8 +1,8 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-08-24 (session 13: sidebar rebuilt to full docs/UI_SPEC.md spec + standalone /ui preview so the whole system is testable without a bench; writes confirmed ENABLED for staging)
-**Current phase:** Roadmap complete (Phases 1–8 functionally done) — UI now matches UI_SPEC and is testable in-browser
-**Current task:** None in flight.
+**Last updated:** 2026-09-08 (session 18: NexPilot conversational-orchestration continuation — eval harness fixed, thin-followup anchoring, NLU fail-fast budget, 133 tests green)
+**Current phase:** Roadmap complete (Phases 1–8 functionally done) — UI matches UI_SPEC structure + UI_VISUAL_SPEC visuals and is testable in-browser
+**Current task:** NexPilot conversational redesign (uncommitted work in progress): Layer-1 exact fast-path + Layer-2 NLU routing, capability registry, clarify/scope/troubleshoot routes, degraded-LLM path. Eval suite 29/29 green with mocked NLU; live NLU verification BLOCKED (Ollama unreachable from this box — see session 18).
 
 ## Session 13 — UI completion (docs/UI_SPEC.md)
 

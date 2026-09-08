@@ -12,12 +12,26 @@ to localhost only (SECURITY.md).
 """
 
 import os
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+import logging
+
+logger = logging.getLogger("nexmate")
+# Uvicorn's default logging setup leaves non-uvicorn loggers without a
+# handler at WARNING level, which silently swallowed this service's
+# structured telemetry. Attach our own stderr handler so decision logs
+# always emit regardless of the ASGI server's logging config.
+if not logger.handlers:
+    _telemetry_handler = logging.StreamHandler()
+    _telemetry_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(_telemetry_handler)
+logger.setLevel(logging.INFO)
 
 import config
 from rag import generator, retriever
@@ -36,11 +50,21 @@ NO_ANSWER = "I don't have a confident answer for this in the knowledge base."
 
 
 class AskRequest(BaseModel):
-    question: str = Field(min_length=3, max_length=2000)
+    # Transport validity only: non-blank, bounded size. Short messages
+    # ("hi", "ok") are conversationally valid — length must never decide
+    # that. Blank-only input is not a message and is still rejected.
+    question: str = Field(min_length=1, max_length=2000)
     session_id: str | None = Field(
         None, pattern=r"[A-Za-z0-9_-]{1,64}",
         description="optional thread id; enables server-side continuity",
     )
+
+    @field_validator("question")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("question must not be blank")
+        return v
 
 
 class Source(BaseModel):
@@ -172,10 +196,20 @@ class ErpnextListRequest(BaseModel):
 
 
 class OrchestrateRequest(BaseModel):
-    question: str = Field(min_length=3, max_length=2000)
+    # Same transport-validity contract as AskRequest: non-blank and
+    # bounded. Conversational validity is the router's job, not the
+    # schema's.
+    question: str = Field(min_length=1, max_length=2000)
     session_id: str | None = Field(
         None, pattern=r"[A-Za-z0-9_-]{1,64}")
     mode: Literal["developer", "employee"] = "developer"
+
+    @field_validator("question")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("question must not be blank")
+        return v
 
 
 class OrchestrateSource(BaseModel):
@@ -191,7 +225,8 @@ class OrchestrateResponse(BaseModel):
     answer: str
     sources: list[OrchestrateSource]
     confidence: Literal["high", "low", "no_match"]
-    route: Literal["erpnext", "code", "rag"]
+    route: Literal["erpnext", "code", "rag", "smalltalk",
+                   "capability", "clarify", "out_of_scope"]
     route_how: str
     mode: Literal["developer", "employee"]
     version_info: dict
@@ -241,7 +276,7 @@ async def _lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="ERPNext AI Copilot — Phase 1", lifespan=_lifespan)
+app = FastAPI(title="NexMate — Your ERPNext AI Companion", lifespan=_lifespan)
 
 # Standalone UI preview: serves the same bundle a Frappe bench injects,
 # so the sidebar can be exercised without a bench (docs/UI_SPEC.md).
@@ -294,7 +329,7 @@ def ask(req: AskRequest) -> AskResponse:
     # question (stateless semantics). Gates downstream stay absolute.
     search_question = req.question
     condensed: str | None = None
-    if history:
+    if orchestrator.should_condense_followup(history, req.question):
         candidate = generator.condense_followup(history, req.question)
         if candidate:
             condensed = candidate
@@ -516,6 +551,9 @@ def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
     Sessions behave like /ask (condense-then-retrieve on follow-ups);
     routing happens on the CONDENSED question when a session is active.
     """
+    import json as _json
+    request_id = uuid.uuid4().hex[:12]
+    t0 = time.perf_counter()
     history: list[dict[str, str]] = []
     if req.session_id:
         try:
@@ -525,7 +563,7 @@ def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
 
     search_question = req.question
     condensed: str | None = None
-    if history:
+    if orchestrator.should_condense_followup(history, req.question):
         candidate = generator.condense_followup(history, req.question)
         if candidate:
             condensed = candidate
@@ -560,6 +598,35 @@ def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
             "line_end": s.get("line_end"),
         }))
 
+    route = result["route"]
+    tools_used: list[str] = []
+    if route == "erpnext" and result.get("confidence") == "high":
+        op = (result.get("route_meta") or {}).get("op", "unknown")
+        tools_used = [f"erpnext.{op}"]
+    elif route == "code" and result.get("confidence") == "high":
+        tools_used = (["code.listing"] if "+listing" in
+                      str(result.get("route_how", "")) else ["code.explain"])
+    # Structured request telemetry: decision metadata only, never message
+    # text (questions may contain company data). HTTP errors propagate
+    # without a telemetry line; uvicorn access logs cover those.
+    logger.info(_json.dumps({
+        "request_id": request_id,
+        "conversation_id": req.session_id or "-",
+        "route": route,
+        "route_how": result.get("route_how"),
+        "detected_intent": result.get("nlu_kind"),
+        "intent_confidence": result.get("nlu_confidence"),
+        "intent_topic": result.get("nlu_topic"),
+        "refined_question": result.get("refined_question"),
+        "confidence": result.get("confidence"),
+        "mode": req.mode,
+        "context_used": bool(history) and condensed is not None,
+        "retrieval_used": route == "rag",
+        "tools_used": tools_used,
+        "fallback": result.get("fallback"),
+        "latency_ms": int((time.perf_counter() - t0) * 1000),
+        "error_type": None,
+    }))
     return OrchestrateResponse(
         answer=result["answer"],
         sources=sources,

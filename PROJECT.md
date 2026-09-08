@@ -7,6 +7,13 @@ sidebar chat panel. Not a generic chatbot that happens to know ERPNext — a
 tool-using assistant that understands this company's specific ERPNext
 instance, its customizations, and its codebase.
 
+## Product name
+
+**NexMate** — "Your ERPNext AI Companion." Use this name in the UI header,
+any greeting/intro text the assistant gives, and README/docs-facing
+copy — replacing generic placeholders like "ERPNext copilot" wherever
+they currently appear in the sidebar and service.
+
 ## Users
 
 **Primary (now):** a developer doing ERPNext deployment and customization as

@@ -66,6 +66,20 @@ ERPNEXT_MAX_LIST_LIMIT = 100
 # How long the live instance's version info is trusted before re-fetching.
 ORCHESTRATOR_VERSION_TTL_SECONDS = 600
 
+# --- Conversational routing ------------------------------------------------------
+# Minimum NLU self-reported confidence to execute a task directly; below
+# this, a task-classified request gets a targeted clarification instead.
+# This is routing confidence only — retrieval and answer confidence keep
+# their own separate gates and values.
+NLU_MIN_CONFIDENCE = float(os.environ.get("NLU_MIN_CONFIDENCE", "0.5"))
+
+# How long the NLU classifier waits per attempt before giving up to the
+# degraded path (heuristic-only routing or safe clarification). Small on
+# purpose: classification is a tiny JSON decision, and a hung provider
+# must surface as a fast honest fallback, not a multi-minute silence.
+# Answer generation keeps its own longer budget inside rag/generator.
+NLU_TIMEOUT_SECONDS = float(os.environ.get("NLU_TIMEOUT_SECONDS", "20"))
+
 # --- ERPNext writes (Phase 8, guarded) ------------------------------------------
 # Writes are REFUSED unless this was deliberately set in .env. Pointing
 # ERPNEXT_BASE_URL at a production system additionally requires an explicit

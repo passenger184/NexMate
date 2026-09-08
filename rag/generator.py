@@ -18,6 +18,11 @@ from litellm import completion
 
 # An inline citation marker like [1], [2][3]
 _CITATION_RE = re.compile(r"\[\d+\]")
+# A citation rendered (wrongly) as a markdown link: [[1]...](...) or
+# [text](url). The frontend renders the structured sources list as pills
+# and never parses citations out of prose, so these show up as broken
+# literal text — they must be rewritten to bare [n] markers.
+_CITATION_LINK_RE = re.compile(r"\[\[\d+\][^\]]*\]\([^)]*\)|\[[^\]]+\]\(https?://[^)]*\)")
 # Backtick-quoted spans: the model's concrete identifiers (hooks, methods,
 # commands). Used for a deterministic grounding check against the context.
 _IDENTIFIER_RE = re.compile(r"`([^`\n]+)`")
@@ -42,7 +47,11 @@ they DO cover. Superficial keyword overlap does NOT count as coverage: if \
 no passage actually addresses what the user asked, decline.
 3. Cite supporting passages inline with their numbers, like [1] or [2][3]. \
 Every substantive claim or step needs at least one citation marker next to \
-it; an answer with zero [n] markers is invalid.
+it; an answer with zero [n] markers is invalid. NEVER render a citation as \
+a markdown link — no `[text](url)`, and especially no `[[n]...](...)` \
+hybrids. Bare [n] markers only: the UI renders the structured sources \
+list as citation pills, and anything you embed in the prose shows up as \
+broken literal text.
 4. If the passages are irrelevant to the question or too thin to answer \
 confidently, reply exactly: "I don't have a confident answer for this in \
 the knowledge base." Do not guess. If they cover the question only \
@@ -70,7 +79,9 @@ names, buttons, field names, or behaviors the passages don't mention.
 hooks, Python/JavaScript, API calls, or developer customization topics - \
 those are out of scope for this user.
 3. Cite supporting passages inline like [1] or [2][3]; an answer with \
-zero [n] markers is invalid.
+zero [n] markers is invalid. NEVER render a citation as a markdown link \
+— no `[text](url)`, and especially no `[[n]...](...)` hybrids. Bare [n] \
+markers only: the UI renders the structured sources list as pills.
 4. If the passages do not cover the question, reply exactly: "I don't \
 have a confident answer for this in the knowledge base." For questions \
 that need developer/administrator rights or customizations, say that \
@@ -105,7 +116,48 @@ that exact symbol verbatim.
 substantive topic words and the symbols.
 4. DO NOT answer the question and DO NOT add facts not present in the \
 conversation or the question.
+5. Never carry over version strings, instance details, or preamble \
+phrasing from earlier assistant answers (e.g. "in ERPNext 16.31.0"). \
+They poison keyword search; the bare topic question retrieves best.
 Output ONLY the rewritten query text."""
+
+
+# Version echoes from earlier assistant answers (the orchestrator's
+# version authority rephrases as "in ERPNext A and B") poison keyword
+# search: BM25 treats the digits as rare discriminating terms, demoting
+# the real how-to pages. Scrubbed from the condenser context AND from
+# the rewritten output, because small models copy such phrases even
+# when the prompt forbids carrying them over. Only the version-number
+# tokens are stripped — a bare "in ERPNext" stays, it is a useful
+# retrieval keyword.
+_VERSION_ECHO_RE = re.compile(
+    r"\s*\d+\.\d+(?:\.\d+)?(?:\s+and\s+\d+\.\d+(?:\.\d+)?)?"
+)
+
+
+def _scrub_version_echoes(text: str) -> str:
+    """Remove version-authority echoes; collapse leftover whitespace."""
+    return re.sub(r"\s{2,}", " ", _VERSION_ECHO_RE.sub("", text)).strip()
+
+
+def _scrub_history_for_condense(
+    history: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Strip version echoes from assistant turns before condensation.
+
+    Assistant answers carry the version authority ("in ERPNext 16.31.0
+    and 16.32.3"), which the condenser's rewrite prompt cannot reliably
+    suppress — the small model copies the phrase into the refined query.
+    User turns are passed through untouched.
+    """
+    cleaned: list[dict[str, str]] = []
+    for turn in history[-4:]:
+        role = turn.get("role", "user")
+        content = str(turn.get("content", ""))
+        if role == "assistant":
+            content = _scrub_version_echoes(content)
+        cleaned.append({"role": role, "content": content})
+    return cleaned
 
 
 def condense_followup(
@@ -125,7 +177,10 @@ def condense_followup(
     """
     if not history:
         return None
-    convo = "\n".join(f"{t['role']}: {t['content']}" for t in history[-4:])
+    convo = "\n".join(
+        f"{t['role']}: {t['content']}"
+        for t in _scrub_history_for_condense(history)
+    )
     messages = [
         {"role": "system", "content": CONDENSE_PROMPT},
         {"role": "user",
@@ -135,7 +190,7 @@ def condense_followup(
         rewritten = _complete(messages)
     except Exception:
         return None
-    rewritten = rewritten.strip().strip('"')
+    rewritten = _scrub_version_echoes(rewritten.strip().strip('"'))
     if not rewritten or len(rewritten) > 1000:
         return None
     return rewritten
@@ -155,14 +210,15 @@ def _model_string() -> str:
     return f"{provider}/{model}"
 
 
-def _complete(messages: list[dict[str, str]]) -> str:
+def _complete(messages: list[dict[str, str]],
+              timeout: float = 120, num_retries: int = 1) -> str:
     response = completion(
         model=_model_string(),
         messages=messages,
         api_base=os.environ.get("OLLAMA_BASE_URL") or None,
         temperature=0.2,
-        timeout=120,
-        num_retries=1,
+        timeout=timeout,
+        num_retries=num_retries,
     )
     answer = response.choices[0].message.content
     if not answer or not answer.strip():
@@ -261,6 +317,20 @@ def generate_answer(
     # silently discarding an otherwise-useful answer would trade one flaw for
     # another; the sources list lets the user audit every claim.
     if not decline:
+        citation_links = _CITATION_LINK_RE.findall(answer)
+        if citation_links:
+            sample = "; ".join(citation_links[:4])
+            messages = messages + [
+                {"role": "assistant", "content": answer},
+                {"role": "user", "content": (
+                    f"Your response renders citations as markdown links "
+                    f"(e.g. {sample}). The UI renders citations itself "
+                    f"from the structured sources list — rewrite the "
+                    f"response replacing every markdown-link citation with "
+                    f"a bare [n] marker pointing at the right passage. "
+                    f"Change nothing else.")},
+            ]
+            answer = _complete(messages)
         ungrounded = _ungrounded_identifiers(answer, chunks)
         if ungrounded:
             listing = "; ".join(ungrounded[:8])

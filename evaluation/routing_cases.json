@@ -1,0 +1,658 @@
+{
+ "$schema": "routing-eval-v1",
+ "description": "Routing evaluation dataset for NexMate conversational orchestration. Each case pins the NLU decision (scripted, deterministic) and asserts routing-layer behavior: selected route, whether RAG ran, which tools ran, clarification, fallback. Generation quality is covered separately by RAGAS and live probes.",
+ "cases": [
+  {
+   "id": "greet-hi",
+   "message": "hi",
+   "history": [],
+   "mode": "developer",
+   "nlu": null,
+   "expect": {
+    "route": "smalltalk",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "greet-variant",
+   "message": "hiiii bro",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "conversational",
+    "subtype": "greeting",
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.97
+   },
+   "expect": {
+    "route": "smalltalk",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "greet-heyyy",
+   "message": "heyyy",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "conversational",
+    "subtype": "greeting",
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.95
+   },
+   "expect": {
+    "route": "smalltalk",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "greet-morning",
+   "message": "good morning",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "conversational",
+    "subtype": "greeting",
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.93
+   },
+   "expect": {
+    "route": "smalltalk",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "thanks",
+   "message": "thanks a lot!",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "conversational",
+    "subtype": "thanks",
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.96
+   },
+   "expect": {
+    "route": "smalltalk",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "ack",
+   "message": "got it",
+   "history": [
+    {
+     "role": "user",
+     "content": "How do I create a Sales Invoice?"
+    },
+    {
+     "role": "assistant",
+     "content": "Open Sales Order... [1]"
+    }
+   ],
+   "mode": "developer",
+   "nlu": {
+    "kind": "conversational",
+    "subtype": "ack",
+    "topic": null,
+    "context_dependency": "follows_topic",
+    "confidence": 0.9
+   },
+   "expect": {
+    "route": "smalltalk",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "bye",
+   "message": "see you later",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "conversational",
+    "subtype": "goodbye",
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.94
+   },
+   "expect": {
+    "route": "smalltalk",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "capability-plain",
+   "message": "what can u do",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "capability",
+    "subtype": null,
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.92
+   },
+   "expect": {
+    "route": "capability",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "capability-typo",
+   "message": "wat can u do",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "capability",
+    "subtype": null,
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.85
+   },
+   "expect": {
+    "route": "capability",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "capability-slang",
+   "message": "hey what r u able to help with",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "capability",
+    "subtype": null,
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.88
+   },
+   "expect": {
+    "route": "capability",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "capability-employee",
+   "message": "what can you help me with",
+   "history": [],
+   "mode": "employee",
+   "nlu": {
+    "kind": "capability",
+    "subtype": null,
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.9
+   },
+   "expect": {
+    "route": "capability",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "knowledge-sales-invoice",
+   "message": "how do I create a sales invoice",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "task",
+    "subtype": null,
+    "topic": "sales invoice creation",
+    "context_dependency": "none",
+    "confidence": 0.92
+   },
+   "expect": {
+    "route": "rag",
+    "rag_called": true,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "knowledge-journal",
+   "message": "what is a journal entry",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "task",
+    "subtype": null,
+    "topic": "journal entry",
+    "context_dependency": "none",
+    "confidence": 0.9
+   },
+   "expect": {
+    "route": "rag",
+    "rag_called": true,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "live-count",
+   "message": "how many purchase invoices are submitted",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "task",
+    "subtype": null,
+    "topic": "submitted purchase invoices",
+    "context_dependency": "none",
+    "confidence": 0.9
+   },
+   "expect": {
+    "route": "erpnext",
+    "rag_called": false,
+    "tools_called": [
+     "erpnext.list"
+    ],
+    "clarification": false,
+    "fallback": null
+   },
+   "extraction": {
+    "op": "list",
+    "doctype": "Purchase Invoice",
+    "filters": {
+     "docstatus": 1
+    },
+    "fields": [
+     "name"
+    ],
+    "limit": 20
+   }
+  },
+  {
+   "id": "live-balance",
+   "message": "what is customer Acme Corp outstanding balance",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "task",
+    "subtype": null,
+    "topic": "customer outstanding",
+    "context_dependency": "none",
+    "confidence": 0.85
+   },
+   "expect": {
+    "route": "erpnext",
+    "rag_called": false,
+    "tools_called": [
+     "erpnext.document"
+    ],
+    "clarification": false,
+    "fallback": null
+   },
+   "extraction": {
+    "op": "document",
+    "doctype": "Customer",
+    "name": "Acme Corp"
+   },
+   "task_route": [
+    "erpnext",
+    "classifier"
+   ]
+  },
+  {
+   "id": "code-where",
+   "message": "where is Sales Invoice implemented",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "task",
+    "subtype": null,
+    "topic": "Sales Invoice implementation",
+    "context_dependency": "none",
+    "confidence": 0.8
+   },
+   "expect": {
+    "route": "code",
+    "rag_called": false,
+    "tools_called": [
+     "code.explain"
+    ],
+    "clarification": false,
+    "fallback": null
+   },
+   "task_route": [
+    "code",
+    "classifier"
+   ]
+  },
+  {
+   "id": "code-traceback",
+   "message": "explain this traceback: ValidationError: item_code is required",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "troubleshoot",
+    "subtype": null,
+    "topic": "ValidationError traceback",
+    "context_dependency": "none",
+    "confidence": 0.9
+   },
+   "expect": {
+    "route": "code",
+    "rag_called": false,
+    "tools_called": [
+     "code.explain"
+    ],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "troubleshoot-vague",
+   "message": "My Sales Invoice won't submit.",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "troubleshoot",
+    "subtype": null,
+    "topic": "sales invoice submit",
+    "context_dependency": "none",
+    "confidence": 0.75
+   },
+   "expect": {
+    "route": "clarify",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": true,
+    "fallback": "clarify"
+   }
+  },
+  {
+   "id": "followup-purchase",
+   "message": "what about purchase invoices?",
+   "history": [
+    {
+     "role": "user",
+     "content": "How do I create a sales invoice?"
+    },
+    {
+     "role": "assistant",
+     "content": "Open a Sales Order... [1]"
+    }
+   ],
+   "mode": "developer",
+   "nlu": {
+    "kind": "task",
+    "subtype": null,
+    "topic": "purchase invoices",
+    "context_dependency": "follows_topic",
+    "confidence": 0.85
+   },
+   "expect": {
+    "route": "rag",
+    "rag_called": true,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "followup-recon",
+   "message": "what about reconciliation?",
+   "history": [
+    {
+     "role": "user",
+     "content": "How do I configure a payment entry?"
+    },
+    {
+     "role": "assistant",
+     "content": "Go to Accounts... [1]"
+    }
+   ],
+   "mode": "developer",
+   "nlu": {
+    "kind": "task",
+    "subtype": null,
+    "topic": "payment reconciliation",
+    "context_dependency": "follows_topic",
+    "confidence": 0.8
+   },
+   "expect": {
+    "route": "rag",
+    "rag_called": true,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "ambiguous-invoices",
+   "message": "invoices",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "clarify",
+    "subtype": null,
+    "topic": "invoices",
+    "context_dependency": "none",
+    "confidence": 0.6
+   },
+   "expect": {
+    "route": "clarify",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": true,
+    "fallback": "clarify"
+   }
+  },
+  {
+   "id": "ambiguous-payments",
+   "message": "payments",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "clarify",
+    "subtype": null,
+    "topic": "payments",
+    "context_dependency": "none",
+    "confidence": 0.55
+   },
+   "expect": {
+    "route": "clarify",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": true,
+    "fallback": "clarify"
+   }
+  },
+  {
+   "id": "oos-weather",
+   "message": "what's the weather today",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "out_of_scope",
+    "subtype": null,
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.95
+   },
+   "expect": {
+    "route": "out_of_scope",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": "scope"
+   }
+  },
+  {
+   "id": "oos-joke",
+   "message": "tell me a joke",
+   "history": [],
+   "mode": "developer",
+   "nlu": {
+    "kind": "out_of_scope",
+    "subtype": null,
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.93
+   },
+   "expect": {
+    "route": "out_of_scope",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": "scope"
+   }
+  },
+  {
+   "id": "contam-greeting",
+   "message": "hey",
+   "history": [
+    {
+     "role": "user",
+     "content": "How do I create a Sales Invoice?"
+    },
+    {
+     "role": "assistant",
+     "content": "Open a Sales Order... [1]"
+    }
+   ],
+   "mode": "developer",
+   "nlu": null,
+   "expect": {
+    "route": "smalltalk",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "contam-capability",
+   "message": "what can you do?",
+   "history": [
+    {
+     "role": "user",
+     "content": "How do I create a Sales Invoice?"
+    },
+    {
+     "role": "assistant",
+     "content": "Open a Sales Order... [1]"
+    }
+   ],
+   "mode": "developer",
+   "nlu": {
+    "kind": "capability",
+    "subtype": null,
+    "topic": null,
+    "context_dependency": "none",
+    "confidence": 0.9
+   },
+   "expect": {
+    "route": "capability",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "contam-newtopic",
+   "message": "How do I submit a Purchase Order?",
+   "history": [
+    {
+     "role": "user",
+     "content": "How do I create a Sales Invoice?"
+    },
+    {
+     "role": "assistant",
+     "content": "Open a Sales Order... [1]"
+    }
+   ],
+   "mode": "developer",
+   "nlu": {
+    "kind": "task",
+    "subtype": null,
+    "topic": "purchase order submit",
+    "context_dependency": "none",
+    "confidence": 0.9
+   },
+   "expect": {
+    "route": "rag",
+    "rag_called": true,
+    "tools_called": [],
+    "clarification": false,
+    "fallback": null
+   }
+  },
+  {
+   "id": "degraded-strong",
+   "message": "how many users are there in our erpnext instance",
+   "history": [],
+   "mode": "developer",
+   "nlu": null,
+   "expect": {
+    "route": "erpnext",
+    "rag_called": false,
+    "tools_called": [
+     "erpnext.list"
+    ],
+    "clarification": false,
+    "fallback": null
+   },
+   "extraction": {
+    "op": "list",
+    "doctype": "User",
+    "fields": [
+     "name"
+    ],
+    "limit": 20
+   }
+  },
+  {
+   "id": "degraded-weak",
+   "message": "invoices",
+   "history": [],
+   "mode": "developer",
+   "nlu": null,
+   "expect": {
+    "route": "clarify",
+    "rag_called": false,
+    "tools_called": [],
+    "clarification": true,
+    "fallback": "clarify"
+   }
+  }
+ ]
+}

@@ -1,4 +1,4 @@
-# ERPNext AI Copilot
+# NexMate — Your ERPNext AI Companion
 
 A tool-using AI assistant for ERPNext developers, embedded in ERPNext as a
 Desk sidebar panel. **Phase 1 scope:** pure RAG over public ERPNext/Frappe

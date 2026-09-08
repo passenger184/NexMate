@@ -10,6 +10,13 @@ import orchestrator
 from rag.generator import PERSONAS
 
 
+# Pinned NLU decision: these tests assert downstream wiring (denials,
+# personas, retrieval scoping), not model output, so routing tests must
+# not depend on a live LLM.
+_TASK_NLU = {"kind": "task", "subtype": None, "topic": None,
+             "context_dependency": "none", "confidence": 0.9}
+
+
 class EmployeeModeTest(unittest.TestCase):
     def test_employee_persona_exists_and_differs(self) -> None:
         self.assertIn("employee", PERSONAS)
@@ -17,7 +24,9 @@ class EmployeeModeTest(unittest.TestCase):
         self.assertIn("developer", PERSONAS)
 
     def test_code_route_denied_for_employees(self) -> None:
-        with mock.patch.object(orchestrator, "decide_route",
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(_TASK_NLU)), \
+            mock.patch.object(orchestrator, "decide_route",
                                return_value=("code", "heuristic")):
             out = orchestrator.handle_question(
                 "Why does pathsafe raise on symlinks?", mode="employee")
@@ -28,7 +37,9 @@ class EmployeeModeTest(unittest.TestCase):
     def test_listing_still_denied_for_employees(self) -> None:
         # The deterministic listing shortcut sits BEHIND the employee
         # denial: least privilege wins over convenience.
-        with mock.patch.object(orchestrator, "decide_route",
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(_TASK_NLU)), \
+            mock.patch.object(orchestrator, "decide_route",
                                return_value=("code", "heuristic")):
             out = orchestrator.handle_question(
                 "what files are inside the project", mode="employee")
@@ -36,7 +47,9 @@ class EmployeeModeTest(unittest.TestCase):
         self.assertEqual(out["confidence"], "low")
 
     def test_code_route_still_works_for_developers(self) -> None:
-        with mock.patch.object(orchestrator, "decide_route",
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(_TASK_NLU)), \
+            mock.patch.object(orchestrator, "decide_route",
                                return_value=("code", "heuristic")), \
                 mock.patch.object(orchestrator.explain,
                                   "locate_and_explain",
@@ -52,7 +65,9 @@ class EmployeeModeTest(unittest.TestCase):
         self.assertEqual(out["confidence"], "high")
 
     def test_schema_lookup_denied_for_employees(self) -> None:
-        with mock.patch.object(orchestrator, "decide_route",
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(_TASK_NLU)), \
+            mock.patch.object(orchestrator, "decide_route",
                                return_value=("erpnext", "heuristic")), \
                 mock.patch.object(
                     orchestrator, "_extract_erpnext_request",
@@ -67,7 +82,9 @@ class EmployeeModeTest(unittest.TestCase):
         self.assertEqual(out["route"], "erpnext")
 
     def test_document_list_allowed_for_employees(self) -> None:
-        with mock.patch.object(orchestrator, "decide_route",
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(_TASK_NLU)), \
+            mock.patch.object(orchestrator, "decide_route",
                                return_value=("erpnext", "heuristic")), \
                 mock.patch.object(
                     orchestrator, "_extract_erpnext_request",
@@ -94,7 +111,9 @@ class EmployeeModeTest(unittest.TestCase):
             captured["include_company"] = include_company
             return []
 
-        with mock.patch.object(orchestrator, "decide_route",
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(_TASK_NLU)), \
+            mock.patch.object(orchestrator, "decide_route",
                                return_value=("rag", "classifier")), \
                 mock.patch.object(orchestrator.retriever, "retrieve",
                                   side_effect=fake_retrieve):
@@ -106,7 +125,9 @@ class EmployeeModeTest(unittest.TestCase):
         chunk = {"title": "sales-invoice", "section": "Creating",
                  "url_or_path": "x", "source_type": "public_doc",
                  "score": 0.9, "text": "steps"}
-        with mock.patch.object(orchestrator, "decide_route",
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(_TASK_NLU)), \
+            mock.patch.object(orchestrator, "decide_route",
                                return_value=("rag", "heuristic")), \
                 mock.patch.object(orchestrator.retriever, "retrieve",
                                   return_value=[chunk]), \

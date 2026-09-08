@@ -1,47 +1,50 @@
-/* ERPNext AI Copilot — sidebar styles (docs/UI_SPEC.md).
+/* ERPNext AI Copilot — sidebar styles.
  *
- * Uses Frappe Desk CSS custom properties when available (native look)
- * with standalone fallbacks so the /ui preview renders identically
- * outside a bench. No hardcoded theme colors beyond the fallbacks.
+ * Visual language per docs/UI_VISUAL_SPEC_updated.md (supersedes all
+ * earlier visual direction): `#2E6FF2` is the ONLY accent in the entire
+ * UI — user message bubble, send arrow, focus rings. Success `#3DBD73`
+ * marks the high-confidence checkmark and added diff lines; danger
+ * `#E5484D` marks removed diff lines and low-confidence/error states.
+ * Everything else is neutral: panel `#15171C`, cards `#1C1E25`,
+ * hairlines `#2A2D36`, text `#F2F3F5` / muted `#9BA0AC`.
+ * Flat surfaces, hairline borders, no shadows, no gradients.
+ * Two type roles only: inherited UI sans, system monospace for
+ * code/diffs/paths. Normal-case labels throughout.
  */
 
 :root {
-  --cp-bg: var(--card-bg, #ffffff);
-  --cp-bg-subtle: var(--card-bg, #f8f8f8);
-  --cp-fg: var(--text-color, #1f2733);
-  --cp-muted: var(--text-muted, #6b7280);
-  --cp-border: var(--border-color, #e2e6e9);
-  --cp-accent: var(--brand-primary, #2490ef);
-  --cp-accent-fg: #ffffff;
-  --cp-user-bubble: color-mix(in srgb, var(--cp-accent) 12%, transparent);
-  --cp-danger: #e11d48;
-  --cp-warn: #d97706;
-  --cp-ok: #059669;
-  --cp-code-bg: #14181d;
-  --cp-code-fg: #e6edf3;
+  --panel-bg: #15171C;
+  --surface-card: #1C1E25;
+  --border: #2A2D36;
+  --text-primary: #F2F3F5;
+  --text-muted: #9BA0AC;
+  --accent: #2E6FF2;
+  --success: #3DBD73;
+  --danger: #E5484D;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace,
+    SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* ---------- toggle button ---------- */
+/* ---------- toggle button: neutral circle, no accent ---------- */
 #cp-root { font-family: inherit; }
 #cp-toggle {
   position: fixed; right: 18px; bottom: 18px; z-index: 1060;
   width: 52px; height: 52px; border-radius: 50%;
-  border: none; cursor: pointer;
-  background: var(--cp-accent); color: var(--cp-accent-fg);
+  cursor: pointer;
+  background: var(--surface-card); color: var(--text-primary);
+  border: 1px solid var(--border);
   font-weight: 700; font-size: 15px;
-  box-shadow: 0 4px 14px rgba(0,0,0,.22);
 }
-#cp-toggle:hover { filter: brightness(1.06); }
+#cp-toggle:hover { color: var(--accent); }
 
 /* ---------- panel ---------- */
 #cp-panel {
   position: fixed; top: 0; right: 0; z-index: 1061;
   height: 100vh; width: 400px; max-width: 96vw;
   display: flex; flex-direction: column;
-  background: var(--cp-bg); color: var(--cp-fg);
-  border-left: 1px solid var(--cp-border);
-  box-shadow: -8px 0 24px rgba(0,0,0,.14);
-  transition: transform .22s ease;
+  background: var(--panel-bg); color: var(--text-primary);
+  border-left: 1px solid var(--border);
+  transition: transform .18s cubic-bezier(.2,.7,.3,1);
 }
 #cp-panel.cp-closed { transform: translateX(105%); }
 #cp-panel.cp-open { transform: translateX(0); }
@@ -54,212 +57,241 @@
 #cp-header {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--cp-border);
-  background: var(--cp-bg-subtle);
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
 }
 .cp-logo {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border-radius: 50%;
-  background: var(--cp-accent); color: var(--cp-accent-fg);
+  background: transparent; color: var(--text-primary);
+  border: 1px solid var(--border);
   font-size: 11px; font-weight: 700;
 }
-.cp-title { font-weight: 600; flex: 1; }
+.cp-title { font-weight: 500; flex: 1; font-size: 13.5px; }
 #cp-mode {
-  border: 1px solid var(--cp-border); background: var(--cp-bg);
-  color: var(--cp-fg); border-radius: 6px; padding: 2px 4px; font-size: 12px;
+  border: 1px solid var(--border); background: var(--surface-card);
+  color: var(--text-primary); border-radius: 4px;
+  padding: 2px 22px 2px 6px; font-size: 12px;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239BA0AC' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 7px center;
+  cursor: pointer;
 }
 #cp-header button {
-  border: none; background: transparent; color: var(--cp-muted);
-  font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 6px;
+  border: none; background: transparent; color: var(--text-muted);
+  font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
 }
-#cp-header button:hover { background: var(--cp-border); }
+#cp-header button:hover { color: var(--text-primary); }
 
-/* ---------- messages ---------- */
-#cp-messages { flex: 1; overflow-y: auto; padding: 12px; }
-.cp-msg { margin-bottom: 12px; }
+/* ---------- messages: assistant has no bubble ---------- */
+#cp-messages { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.cp-msg { margin-bottom: 14px; animation: cp-fade-up .25s ease; }
 .cp-msg-user { display: flex; justify-content: flex-end; }
 .cp-bubble {
-  max-width: 85%;
-  background: var(--cp-user-bubble);
-  border: 1px solid color-mix(in srgb, var(--cp-accent) 25%, transparent);
-  padding: 8px 10px; border-radius: 12px 12px 2px 12px;
+  max-width: 80%;
+  background: var(--accent); color: #FFFFFF;
+  padding: 10px 14px; border-radius: 18px;
   white-space: pre-wrap; word-break: break-word; font-size: 13.5px;
 }
-.cp-msg-a { font-size: 13.5px; line-height: 1.45; }
+.cp-msg-a { font-size: 13.5px; line-height: 1.6; color: var(--text-primary); }
+@keyframes cp-fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .cp-typing span {
   display: inline-block; width: 6px; height: 6px; margin-right: 3px;
-  border-radius: 50%; background: var(--cp-muted);
+  border-radius: 50%; background: var(--text-muted);
   animation: cpblink 1.2s infinite ease-in-out;
 }
 .cp-typing span:nth-child(2) { animation-delay: .18s; }
 .cp-typing span:nth-child(3) { animation-delay: .36s; }
 @keyframes cpblink { 0%,80%,100%{opacity:.25} 40%{opacity:1} }
 
-.cp-meta-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
-.cp-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--cp-border); }
-.cp-conf-high { color: var(--cp-ok); border-color: color-mix(in srgb, var(--cp-ok) 40%, transparent); }
-.cp-conf-low { color: var(--cp-warn); border-color: color-mix(in srgb, var(--cp-warn) 45%, transparent); }
-.cp-conf-nomatch { color: var(--cp-danger); border-color: color-mix(in srgb, var(--cp-danger) 45%, transparent); }
-.cp-route {
-  font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
-  color: var(--cp-muted); border: 1px dashed var(--cp-border);
-  padding: 2px 6px; border-radius: 999px;
+/* ---------- citation pills: [n] path, directly under the answer ---------- */
+.cp-pills { margin: 8px 0 0; line-height: 2; }
+.cp-meta-row { display: flex; gap: 8px; align-items: baseline; margin: 8px 0 0; flex-wrap: wrap; }
+.cp-pill {
+  display: inline-flex; align-items: baseline;
+  border-radius: 4px; font-size: 11px;
+  border: 1px solid var(--border); background: var(--surface-card);
+  color: var(--text-muted);
+  margin: 0 4px 4px 0; cursor: pointer;
+  padding: 2px 7px; max-width: 100%;
 }
-.cp-versionline { margin-top: 6px; font-size: 10.5px; color: var(--cp-muted); }
+.cp-pill:hover { color: var(--text-primary); }
+.cp-pill .cp-pill-path { font-family: var(--font-mono); font-size: 11px; }
 
-.cp-callout {
-  padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; font-size: 12.5px;
-}
-.cp-callout-amber {
-  background: color-mix(in srgb, var(--cp-warn) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--cp-warn) 45%, transparent);
-}
-.cp-callout-red {
-  background: color-mix(in srgb, var(--cp-danger) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--cp-danger) 40%, transparent);
-}
+/* ---------- confidence: small inline row below the pills ---------- */
+.cp-conf { font-size: 11px; color: var(--text-muted); }
+.cp-conf .cp-check { color: var(--success); }
+.cp-conf-high { color: var(--success); }
+.cp-conf-low, .cp-conf-nomatch { color: var(--danger); }
+.cp-versionline { margin-top: 6px; font-size: 11px; color: var(--text-muted); }
 
 /* answer typography */
 .cp-answer p { margin: 0 0 8px; }
-.cp-answer h3, .cp-answer h4 { margin: 10px 0 6px; }
+.cp-answer h3, .cp-answer h4 { margin: 10px 0 6px; font-weight: 600; }
 .cp-answer ul, .cp-answer ol { margin: 0 0 8px 18px; }
 .cp-answer code {
-  background: color-mix(in srgb, var(--cp-accent) 9%, transparent);
-  padding: 1px 4px; border-radius: 4px; font-size: 12px;
+  font-family: var(--font-mono);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  padding: 1px 4px; border-radius: 3px; font-size: 12px;
 }
-.cp-answer a { color: var(--cp-accent); }
+.cp-answer a { color: var(--text-primary); text-decoration: underline; }
+.cp-answer a:hover { color: var(--accent); }
 
 /* code blocks */
 .cp-code {
   border-radius: 8px; overflow: hidden; margin: 8px 0;
-  border: 1px solid rgba(255,255,255,.06);
+  border: 1px solid var(--border);
 }
 .cp-code-head {
   display: flex; justify-content: space-between; align-items: center;
-  background: #1c222a; color: #9fb0c3;
-  font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+  background: var(--surface-card); color: var(--text-muted);
+  font-size: 11px;
   padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
 }
 .cp-copy {
-  background: transparent; color: #9fb0c3; border: 1px solid #39434e;
-  border-radius: 5px; font-size: 10.5px; cursor: pointer; padding: 1px 8px;
+  background: transparent; color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px; font-size: 11px; cursor: pointer; padding: 1px 8px;
 }
-.cp-copy:hover { color: #fff; }
+.cp-copy:hover { color: var(--text-primary); }
 .cp-code pre {
-  margin: 0; background: var(--cp-code-bg); color: var(--cp-code-fg);
+  margin: 0; background: var(--surface-card); color: var(--text-primary);
   padding: 10px 12px; overflow-x: auto; font-size: 12px; line-height: 1.5;
+  font-family: var(--font-mono);
 }
 
-/* citations */
-.cp-pill {
-  display: inline-flex; min-width: 17px; height: 17px;
-  align-items: center; justify-content: center;
-  border-radius: 999px; font-size: 10.5px;
-  background: var(--cp-accent); color: var(--cp-accent-fg);
-  margin: 0 2px; cursor: pointer; vertical-align: 1px;
-}
-.cp-pill-static { cursor: default; background: var(--cp-muted); }
-.cp-sources {
-  margin-top: 8px; border-top: 1px dashed var(--cp-border); padding-top: 6px;
-}
-.cp-sources-title { font-size: 10.5px; color: var(--cp-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
-.cp-source-row { font-size: 12px; padding: 3px 4px; border-radius: 6px; display: flex; gap: 6px; align-items: baseline; word-break: break-word; }
-.cp-source-row.cp-flash { background: color-mix(in srgb, var(--cp-accent) 12%, transparent); }
-.cp-source-link { margin-left: auto; font-size: 11px; color: var(--cp-accent); }
-
-/* diff */
+/* diff card: surface-card, hairline, terminal monospace view */
 .cp-card {
-  border: 1px solid var(--cp-border); border-radius: 10px;
-  padding: 10px; background: var(--cp-bg-subtle); margin-top: 4px;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; background: var(--surface-card); margin-top: 4px;
 }
-.cp-applied { opacity: .92; border-color: color-mix(in srgb, var(--cp-ok) 50%, transparent); }
+.cp-applied { border-color: color-mix(in srgb, var(--success) 50%, transparent); }
 .cp-rejected { opacity: .55; }
-.cp-card-title { font-size: 13px; margin-bottom: 8px; word-break: break-word; }
-.cp-diff {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11.5px; line-height: 1.5; border-radius: 8px; overflow: hidden;
-  border: 1px solid rgba(255,255,255,.08);
-  background: var(--cp-code-bg); max-height: 260px; overflow-y: auto;
+/* Brief color sweep confirming a consequential apply. Runs once. */
+.cp-sweep { animation: cp-sweep .9s ease-out 1; }
+@keyframes cp-sweep {
+  0% { background: color-mix(in srgb, var(--success) 22%, transparent); }
+  100% { background: transparent; }
 }
-.cp-diff-line { white-space: pre-wrap; padding: 0 8px; color: var(--cp-code-fg); }
-.cp-diff-file { color: #9fb0c3; font-weight: 600; }
-.cp-diff-hunk { color: #79c0ff; background: rgba(121,192,255,.08); }
-.cp-diff-add { color: #7ee787; background: rgba(46,160,67,.16); }
-.cp-diff-del { color: #ffa198; background: rgba(218,54,51,.16); }
+.cp-card-title { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; word-break: break-word; }
+.cp-card-title code { font-family: var(--font-mono); }
+.cp-diff {
+  font-family: var(--font-mono);
+  font-size: 11.5px; line-height: 1.55;
+  background: var(--surface-card); max-height: 260px; overflow-y: auto;
+  padding: 6px 0;
+}
+.cp-diff-line {
+  white-space: pre-wrap; padding: 0 8px 0 0; color: var(--text-primary);
+  border-left: 3px solid transparent;
+}
+.cp-diff-line .cp-gutter { display: inline-block; width: 26px; color: var(--text-muted); user-select: none; }
+.cp-diff-file { color: var(--text-muted); font-weight: 600; }
+.cp-diff-hunk { color: var(--text-muted); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.cp-diff-add { border-left-color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.cp-diff-add .cp-gutter { color: var(--success); }
+.cp-diff-del { border-left-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.cp-diff-del .cp-gutter { color: var(--danger); }
 
 .cp-approvebar { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+.cp-approvebar .cp-btn { flex: 1; }
 .cp-btn {
-  border: 1px solid var(--cp-border); background: var(--cp-bg);
-  color: var(--cp-fg); padding: 5px 12px; border-radius: 7px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-primary); padding: 5px 12px; border-radius: 4px;
   cursor: pointer; font-size: 12.5px;
 }
+.cp-btn:hover { border-color: var(--text-muted); }
 .cp-btn-primary {
-  background: var(--cp-ok); border-color: var(--cp-ok); color: #fff;
+  background: #F2F3F5; border-color: #F2F3F5;
+  color: #15171C;
   font-weight: 600;
 }
 .cp-btn:disabled { opacity: .6; cursor: wait; }
-.cp-committed { font-size: 12.5px; color: var(--cp-ok); }
-.cp-error-inline { color: var(--cp-danger); font-size: 12px; white-space: pre-wrap; }
+.cp-committed { font-size: 12.5px; color: var(--success); }
+.cp-committed code { font-family: var(--font-mono); font-size: 12px; }
+.cp-error-inline { color: var(--danger); font-size: 12px; white-space: pre-wrap; }
 .cp-writepreview {
-  background: var(--cp-code-bg); color: var(--cp-code-fg);
-  padding: 10px; border-radius: 8px; font-size: 11.5px; overflow-x: auto;
-  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  background: var(--panel-bg); color: var(--text-primary);
+  padding: 10px; border-radius: 4px; font-size: 11.5px; overflow-x: auto;
+  margin: 0 0 8px; border: 1px solid var(--border);
 }
-.cp-reasonline { font-size: 12px; color: var(--cp-muted); }
+.cp-reasonline { font-size: 12px; color: var(--text-muted); }
 .cp-envlabel {
-  font-size: 10px; padding: 1px 7px; border-radius: 999px;
-  background: color-mix(in srgb, var(--cp-warn) 20%, transparent);
-  border: 1px solid var(--cp-warn); text-transform: uppercase;
+  font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--border); color: var(--text-muted);
 }
-.cp-memorynote { font-size: 11px; color: var(--cp-muted); margin-top: 6px; }
+.cp-memorynote { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
 
-/* errors / system notes */
+/* errors: danger family only */
 .cp-error-banner {
-  background: color-mix(in srgb, var(--cp-danger) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--cp-danger) 40%, transparent);
-  color: var(--cp-fg); border-radius: 8px; padding: 8px 10px; font-size: 12.5px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--text-primary); border-radius: 4px; padding: 8px 10px; font-size: 12.5px;
 }
-.cp-error-detail { display: block; margin-top: 4px; color: var(--cp-muted); font-size: 11px; }
-/* Server answered with an error (e.g. 404/409 refusal): amber, and — unlike
-   the connectivity banner above — never implies the service is down. */
+.cp-error-detail { display: block; margin-top: 4px; color: var(--text-muted); font-size: 11px; }
+/* Server answered with an error (e.g. 404/409 refusal): same danger
+   treatment, and — unlike the connectivity banner above — never implies
+   the service is down. */
 .cp-error-app {
-  background: color-mix(in srgb, var(--cp-warn) 12%, transparent);
-  border-color: color-mix(in srgb, var(--cp-warn) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
 .cp-systemnote {
-  text-align: center; font-size: 11px; color: var(--cp-muted); margin: 8px 0;
+  text-align: center; font-size: 11px; color: var(--text-muted); margin: 8px 0;
 }
 
-/* empty state */
+/* empty state: suggestion chips use the citation-pill treatment */
 .cp-empty { text-align: center; padding: 26px 8px; }
 .cp-empty-title { font-weight: 600; margin-bottom: 12px; }
 .cp-suggestion {
   display: block; width: 100%; margin: 6px 0; padding: 8px 10px;
-  border: 1px solid var(--cp-border); background: var(--cp-bg);
-  color: var(--cp-fg); border-radius: 9px; cursor: pointer; font-size: 12.5px;
+  border: 1px solid var(--border); background: var(--surface-card);
+  color: var(--text-primary); border-radius: 4px; cursor: pointer; font-size: 12.5px;
   text-align: left;
 }
-.cp-suggestion:hover { border-color: var(--cp-accent); }
-.cp-empty-hint { margin-top: 14px; font-size: 11px; color: var(--cp-muted); }
+.cp-suggestion:hover { color: var(--text-primary); }
+.cp-empty-hint { margin-top: 14px; font-size: 11px; color: var(--text-muted); }
 
-/* input row */
+/* input bar: pinned, panel bg, hairline separator; single rounded field
+   plus an icon-only accent send arrow (no filled button). */
 #cp-inputrow {
-  display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--cp-border);
-  background: var(--cp-bg-subtle);
+  display: flex; gap: 4px; padding: 10px; border-top: 1px solid var(--border);
+  background: var(--panel-bg); align-items: flex-end;
 }
 #cp-input {
-  flex: 1; resize: none; border: 1px solid var(--cp-border);
-  border-radius: 9px; padding: 8px 10px; font: inherit; font-size: 13.5px;
-  background: var(--cp-bg); color: var(--cp-fg); max-height: 140px;
+  flex: 1; resize: none; border: 1px solid var(--border);
+  border-radius: 18px; padding: 8px 12px; font: inherit; font-size: 13.5px;
+  background: var(--surface-card); color: var(--text-primary); max-height: 140px;
 }
-#cp-input:focus { outline: 1px solid var(--cp-accent); }
+#cp-input::placeholder { color: var(--text-muted); }
+#cp-input:focus { outline: 1px solid var(--accent); }
 #cp-send {
-  border: none; background: var(--cp-accent); color: var(--cp-accent-fg);
-  border-radius: 9px; padding: 0 14px; cursor: pointer; font-weight: 600;
+  border: none; background: transparent; color: var(--accent);
+  cursor: pointer; padding: 6px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
 }
-#cp-send:disabled { opacity: .55; }
+#cp-send svg { width: 20px; height: 20px; display: block; }
+#cp-send:hover { filter: brightness(1.15); }
+#cp-send:disabled { opacity: .45; cursor: wait; }
 
 @media (max-width: 480px) {
   #cp-panel { width: 100vw !important; }
+}
+
+/* Reduced motion: static panel, no fade, no sweep. The typing dots keep
+   their shape but stop blinking so state is still visible. */
+@media (prefers-reduced-motion: reduce) {
+  #cp-panel { transition: none; }
+  .cp-msg { animation: none; }
+  .cp-sweep { animation: none; }
+  .cp-typing span { animation: none; opacity: .6; }
 }
