@@ -1,17 +1,20 @@
 # NexMate — Your ERPNext AI Companion
 
-A tool-using AI assistant for ERPNext developers, embedded in ERPNext as a
-Desk sidebar panel. **Phase 1 scope:** pure RAG over public ERPNext/Frappe
-documentation — ask developer questions, get answers grounded only in
-retrieved documentation, every answer citing its source pages. When
-retrieval can't find relevant material, it honestly says so instead of
-guessing.
+A tool-using AI assistant for Frappe v16 / ERPNext v16, with a Desk sidebar
+implementation and standalone browser preview. The current single-project
+system includes cited public/company retrieval, code tools, conversation
+history, live ERPNext reads, developer/employee personas, and confirmed
+staging create/update actions. Historical Phases 1–8 acceptance is not
+production readiness; real Bench/Desk integration remains unverified.
 
-See `PROJECT.md` (product definition), `ARCHITECTURE.md` (system design),
-`docs/PHASE_1_SPEC.md` (current-phase spec) and `progress/CURRENT.md`
-(exact current state).
+See `PROJECT.md` (product definition), `ARCHITECTURE.md` (the sole canonical
+HLD, current versus approved target), `ROADMAP.md` (historical acceptance
+and future gates), and `progress/CURRENT.md` (evidence and limitations).
+`docs/PHASE_1_SPEC.md` preserves historical requirements, not current scope.
+NexMate is the documentation-facing name; historical "NexPilot" references
+and technical identifiers such as `erpnext_ai_copilot` are not runtime renames.
 
-## Architecture in one paragraph
+## Retrieval overview
 
 Docs are crawled once from `docs.frappe.io` (its official `{url}.md`
 markdown alternates) into `data/raw_docs/`, split heading-wise into
@@ -75,8 +78,10 @@ exits non-zero listing ~170 permanently-dead sitemap aliases in
 `data/raw_docs/_failed_urls.txt` — that is expected (they're dead or moved
 to other Frappe products), not a failure of the crawl itself.
 
-Re-run `chunk_and_embed` anytime for a full rebuild (it drops and recreates
-the collection).
+`chunk_and_embed` drops and recreates the shared collection, including
+company/resolution chunks added later. Treat this as a destructive rebuild,
+not an incremental refresh; preserve and re-ingest the other corpora as
+needed. See `ARCHITECTURE.md` for index freshness and rebuild limitations.
 
 ## Run the service
 
@@ -150,12 +155,15 @@ curl -s http://127.0.0.1:8000/orchestrate \
   -d '{"question": "What fields does Customer have?", "mode": "developer"}'
 ```
 
-Single entry point that routes between RAG (general docs), the code agent
-(this repo's source), and the live ERPNext tool — responses carry `route`,
-`route_how`, and live `version_info`. `mode: "employee"` switches to a
-plain-language desk-user persona over public docs only: the code agent and
-DocType-schema lookups are denied, while document/list lookups stay
-available. Sessions work here exactly like on `/ask` (`session_id`).
+Conversational entry point with seven response routes: `rag`, `code`,
+`erpnext`, `smalltalk`, `capability`, `clarify`, and `out_of_scope`
+(`service/main.py:224`). Exact fast paths and NLU precede the three-way
+task router; direct tool endpoints also remain available. Responses carry
+`route`, `route_how`, and `version_info` (which can report unavailable).
+`mode: "employee"` selects a public-docs persona and orchestration guards
+against code/schema routes; it is caller-supplied, not authenticated
+permission enforcement. Sessions use `session_id`, as on `/ask`.
+See `ARCHITECTURE.md` for current boundaries and the Frappe-authorized target.
 
 ## Test the UI right now (no bench needed)
 
@@ -181,13 +189,18 @@ Click the **AI** button (bottom-right). What you can do:
 | `/newdoc Customer {"customer_name": "...", "customer_type": "Individual", "customer_group": "Commercial"} :: reason` | shows an **ERPNext write card** — Approve creates the document live (staging!) |
 | `/editdoc Customer <name> {"customer_name": "new"} :: reason` | same flow for updates |
 
-The header switch flips between **developer** and **employee** modes
-(employee = public-docs persona, no code agent, no schema lookups).
-⟲ starts a fresh conversation; sessions survive page reloads.
+The header switch selects **developer** or **employee** orchestration
+behavior, not user privileges. Start fresh resets the session. The browser
+retains a session ID and the service retains JSON history, but the visible
+transcript is not restored after reload. The preview is not Bench proof.
 
-## Install the Desk sidebar (Frappe app)
+## Desk sidebar setup outline (unverified)
 
-On the machine running your ERPNext bench:
+The app metadata lives under `frappe_app/pyproject.toml`, not at the repo
+root. A root-repository `bench get-app <repo-url>` install is **not verified**;
+neither the nested package layout nor asset discovery is certified here.
+The following historical manual-copy outline is for controlled development
+verification only, not a validated clean-machine installation recipe:
 
 ```bash
 # copy this repo's frappe_app/ directory into the bench as an app
@@ -202,14 +215,23 @@ bench --site yoursite.local set-config copilot_api_base "http://<service-host>:8
 bench --site yoursite.local clear-cache
 ```
 
-Then open the desk: a floating **AI** button sits bottom-right; it opens a
-chat panel with a Sources list and confidence badges. The service address
-reaches the client via `frappe.boot.copilot_settings` (`boot.py`).
+Intended Desk behavior is a floating **AI** button opening the NexMate
+panel; installation, built assets and real Desk behavior still need proof.
+The service address reaches the browser through
+`frappe.boot.copilot_settings` (`frappe_app/erpnext_ai_copilot/boot.py:10`),
+and the browser calls FastAPI directly; `localhost` means the browser's
+machine, not necessarily the Bench host.
 
-> If the ERPNext site is served over HTTPS, browsers block calls to an
-> `http://` service (mixed content). For development over plain HTTP this
-> just works; put TLS or a same-origin proxy in front of FastAPI for
-> production HTTPS setups.
+> HTTPS pages block plain-HTTP API calls. TLS or a same-origin proxy alone
+> does not establish production authorization. The approved target is
+> browser-to-authenticated-Frappe only, with private separate inference;
+> that migration is not implemented by these setup steps.
+
+Same-source Bench/Docker installation and update parity, compatibility,
+patches/migrate, release and rollback checks are **future gates**, not
+verified deployment support. See `DEVELOPMENT.md` and `ARCHITECTURE.md`.
+The app declares Frappe `>=15`; the product target is v16, not a tested
+compatibility matrix.
 
 ## Evaluate
 

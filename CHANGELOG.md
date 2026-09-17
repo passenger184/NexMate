@@ -3,14 +3,20 @@
 Format: [Keep a Changelog](https://keepachangelog.com/). Update this as
 part of completing meaningful units of work — not just at phase end.
 
+Entries record historical changes, not a production-readiness certificate.
+Test totals and live checks retain their original scope; see `progress/`
+for evidence and `ARCHITECTURE.md` for the sole canonical current/target HLD.
+
 ## [Unreleased]
 
 ### Added
-- NexPilot conversational orchestration (in progress, uncommitted):
+- NexMate conversational orchestration (historically called "NexPilot";
+  recorded as committed in `a7676ec`, live NLU acceptance incomplete):
   Layer-1 exact fast-path for canonical greetings/acks/help (zero model
-  calls) + Layer-2 NLU understanding (greeting/capability/troubleshoot/
-  clarify/out_of_scope/task) before any tool runs; single authoritative
-  capability registry (`capabilities.py`) behind "what can you do?";
+  calls) + Layer-2 NLU understanding (conversational/capability/troubleshoot/
+  clarify/out_of_scope/task) on the orchestrated path; descriptive
+  capability registry (`capabilities.py`) behind "what can you do?"
+  (not dispatch or authorization; direct tools remain separate);
   targeted clarification for ambiguous input; polite out-of-scope
   boundary; troubleshoot reuses error-text→code path or asks for the
   traceback; thin follow-ups ("why?") retrieve anchored on the NLU
@@ -18,10 +24,13 @@ part of completing meaningful units of work — not just at phase end.
   clarification (never blind RAG); NLU calls run on a short fail-fast
   budget (`NLU_TIMEOUT_SECONDS`, default 20s, no transport retry).
   Evaluation: 29-case routing dataset (`evaluation/routing_cases.json`)
-  + wiring harness, 133 Python tests + 26 node checks green.
-  Live NLU verification still blocked (generation provider unreachable
-  from this box).
-- Sidebar restyled to docs/UI_VISUAL_SPEC.md: ink-navy instrument-panel
+  + mocked wiring harness; session 18 recorded 133 Python tests + 26
+  stub-DOM node checks green. Full live NLU verification was blocked by
+  provider reachability then; no current connectivity measurement or full
+  live-matrix acceptance is implied. Troubleshoot is an NLU kind mapping
+  to code/clarify, not an eighth response route.
+- Historical sidebar restyle to docs/UI_VISUAL_SPEC.md (amber direction,
+  superseded by docs/UI_VISUAL_SPEC_updated.md): ink-navy instrument-panel
   surfaces with hairline borders, amber single accent, teal reserved for
   trust and rust for caution, status-LED confidence signals, terminal
   diff with colored gutters, muted monospace citation paths, approve
@@ -32,7 +41,9 @@ part of completing meaningful units of work — not just at phase end.
   developer/employee mode switch, route/version chips, typing & error &
   empty states, and inline diff/write APPROVAL CARDS (/edit /newdoc
   /editdoc) plus /read /search /explain. Standalone preview at GET
-  /ui/preview.html makes the full system browser-testable without a bench.
+  /ui/preview.html enables standalone browser checks, not real Bench/Desk
+  installation verification. Browser transcript restoration and streaming
+  remain target work.
 - Phase 8 Write-capable ERPNext Agent: `tools/erpnext_write.py` +
   `POST /tools/erpnext_write/propose|apply` — flag-gated
   (ERPNEXT_WRITE_ENABLED), Tier-2 confirm flow with exact previews,
@@ -92,9 +103,11 @@ part of completing meaningful units of work — not just at phase end.
 - `PROJECT_ROOT`, `MAX_READ_FILE_BYTES`, and proposal-TTL configuration.
 
 ### Changed
-- Product renamed to NexMate ("Your ERPNext AI Companion") across all
-  UI-facing surfaces: sidebar header, greeting text, preview page title,
-  README, and service title. Code identifiers and history untouched.
+- Product renamed to NexMate ("Your ERPNext AI Companion") on the listed
+  surfaces: sidebar header, greeting text, preview page title, README, and
+  service title. Historical "NexPilot" labels and technical identifiers
+  remain; this is not a guarantee that every runtime string was renamed.
+  Blue styling below follows canonical `docs/UI_VISUAL_SPEC_updated.md`.
   `#2E6FF2` accent (user bubble, send arrow icon, focus rings), neutral
   toggle/header/dropdown, `[n] path` citation pills with monospace paths,
   quiet inline confidence row below the pills (callout banners removed),

@@ -1,10 +1,18 @@
 # docs/UI_SPEC.md — Sidebar UI Design
 
-This is a standing design reference, not a phase — it applies to the
-Frappe sidebar app from Phase 1 onward. The Phase 1 sidebar was built
-minimally per the original spec; treat bringing it in line with this doc
-as part of Phase 2's work (the diff/approve UI here depends on Phase 2's
-edit tool existing anyway).
+Standing interaction/structure reference for the NexMate sidebar, not a
+current-phase task list or an implementation-verification report. Phase 1
+introduced the sidebar and Phase 2 introduced code-edit approval.
+`docs/UI_VISUAL_SPEC_updated.md` is the canonical blue visual reference;
+it supersedes the historical amber `docs/UI_VISUAL_SPEC.md` and conflicting
+visual details here. `ARCHITECTURE.md` alone owns the current/target HLD.
+
+The current bundle uses a floating toggle, direct FastAPI calls and
+complete JSON responses. Real Bench/Desk installation remains unverified.
+Navbar integration, authenticated Frappe-owned history, transcript
+restoration, streaming/realtime and authorized page context are target
+work, not delivered by this reference. See `progress/CURRENT.md` for
+observed evidence and `EVALUATION.md` for future acceptance gates.
 
 ## Principle: native to ERPNext, not bolted on
 
@@ -35,11 +43,10 @@ shouldn't be able to tell it wasn't built by the Frappe team.
 - Citations render as small pills below the relevant answer (e.g. `[1]
   custom_app/validations.py`), not inline footnote markers cluttering the
   prose. Tapping a pill can show the section/snippet or link to the source.
-- Confidence: a small inline label for `high` (e.g. a subtle checkmark +
-  "high confidence"), and a visually distinct, slightly more prominent
-  callout style for `low` or `no_match` — this is the one state that should
-  actually catch the eye, since it's telling the user not to fully trust
-  the answer.
+- Confidence: visually distinguish `high`, `low` and `no_match` using the
+  quiet inline treatment in `docs/UI_VISUAL_SPEC_updated.md`, not the
+  earlier large-callout direction. Low/no-match must still clearly warn
+  the user not to rely on an unsupported answer.
 
 ## Diff / edit approval (Phase 2 dependency)
 

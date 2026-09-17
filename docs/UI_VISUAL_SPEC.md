@@ -1,6 +1,15 @@
-# docs/UI_VISUAL_SPEC.md — Visual Design Direction
+# docs/UI_VISUAL_SPEC.md — Historical Amber Visual Direction
 
-This governs colors, type, and visual personality. `docs/UI_SPEC.md`
+**Superseded in full by `docs/UI_VISUAL_SPEC_updated.md`, the canonical
+blue visual reference for NexMate.** This file preserves the earlier amber
+direction for historical context; its instructions below are not active,
+even when an older reference or agent configuration loads this file.
+`docs/UI_SPEC.md` owns interaction structure; `ARCHITECTURE.md` alone owns
+the HLD. This annotation changes neither runtime styles nor agent config.
+
+## Preserved historical direction
+
+This governed colors, type, and visual personality. `docs/UI_SPEC.md`
 already covers structure/behavior (layout, states, diff approval flow) —
 implement that structure using the visual language defined here. Do not
 default to a generic "AI chatbot" look (soft gradients, a single bright

@@ -1,8 +1,17 @@
 # docs/FUTURE_MULTI_WORKSPACE.md — Deferred Direction, Not Current Scope
 
-**Status: not on the active roadmap. Do not build any of this until the
-user explicitly reopens it.** This exists so the reasoning already worked
-through isn't lost, not as something to start on.
+**Status: deferred shared-workspace proposal, not an approved topology.**
+Do not implement this proposal without a separately approved change.
+`ARCHITECTURE.md` is the sole canonical HLD: its approved production
+direction requires site-isolated private knowledge and user authorization,
+but leaves per-site versus shared deployment, repository binding and
+public-index sharing unresolved. Independent installations do not require
+a shared workspace registry. NexMate currently remains single-project.
+
+The concrete choices below preserve earlier exploration, not accepted
+contracts. A caller-supplied `workspace_id` or browser-derived site hint
+would not establish authority; any future design must use authenticated
+site binding and intra-site permissions before retrieval or execution.
 
 ## The eventual idea
 
@@ -14,7 +23,7 @@ projects: the user runs several separate local Frappe/ERPNext projects
 representing one project, auto-detecting which one it's currently talking
 to.
 
-## The shape it would take, when it's time
+## Earlier candidate shape — unresolved, not selected
 
 - **Public knowledge** (ERPNext/Frappe docs) indexed once, shared read-only
   across all workspaces — never re-scraped or re-embedded per project.

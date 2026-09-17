@@ -1,7 +1,19 @@
-# PHASE_1_SPEC.md — Current Build Scope
+# PHASE_1_SPEC.md — Historical Phase 1 Requirements
 
-This is the only scope for current work. See `ARCHITECTURE.md` for full
-context and `ROADMAP.md` for what comes after.
+**Historical reference, not current build scope.** Phase 1 was accepted
+2026-08-24 with exceptions recorded in `ROADMAP.md` and `EVALUATION.md`;
+real Bench/Desk verification remains outstanding. `ARCHITECTURE.md` is the
+sole canonical HLD. Post-roadmap work requires a user-approved OpenSpec
+change; the original requirements below do not prohibit maintaining later
+implemented features or authorize new work, tests or provider changes.
+`SECURITY.md` remains standing policy, including private-data cloud consent.
+
+The original public-only scope, API shape and tuning defaults below record
+Phase 1 intent, not today's full implementation. The restored 2026-08-23
+crawl-source and hybrid-chunking ADRs in `DECISIONS.md` explain changes to
+the original source preference and chunking approach.
+
+## Original requirements
 
 ## Goal
 

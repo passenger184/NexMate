@@ -9,18 +9,35 @@ instance, its customizations, and its codebase.
 
 ## Product name
 
-**NexMate** — "Your ERPNext AI Companion." Use this name in the UI header,
-any greeting/intro text the assistant gives, and README/docs-facing
-copy — replacing generic placeholders like "ERPNext copilot" wherever
-they currently appear in the sidebar and service.
+**NexMate** — "Your ERPNext AI Companion." This is the current product name
+for UI and documentation-facing copy. Historical NexPilot quotations retain
+their provenance; runtime/package identifiers are not renamed by this
+documentation change. Remaining runtime naming drift is separate future work.
+
+## Scope and authority
+
+Target **Frappe v16 / ERPNext v16**, one project today. `ARCHITECTURE.md` is
+the sole canonical HLD; `ROADMAP.md` preserves historical Phase 1–8
+acceptance with exceptions. Post-roadmap work requires a user-approved
+OpenSpec change, not a historical phase spec or an unresolved HLD option.
+
+The accepted production direction is authenticated Frappe control/state
+ownership with separate private inference, site-isolated private knowledge
+and permission checks before retrieval/execution. It is not delivered
+production readiness, selected tenancy/executor topology, cloud-data consent
+or production-write approval. `SECURITY.md` governs those boundaries;
+`DECISIONS.md` records approval provenance. Shared multi-workspace support,
+MCP and the separate Developer Workbench remain deferred.
 
 ## Users
 
 **Primary (now):** a developer doing ERPNext deployment and customization as
 their day job — Developer/Admin mode.
 
-**Future:** the wider dev team, then non-technical ERP end users —
-Employee/User mode.
+**Employee/User audience:** non-technical ERP end users; the restricted
+persona and orchestrated public-doc retrieval were implemented in Phase 7.
+Wider deployment remains future work: caller-selected mode is not an
+authenticated role, and real Bench/Desk integration remains unverified.
 
 ## Developer/Admin mode — representative questions
 
@@ -36,7 +53,7 @@ Employee/User mode.
 - What hook should I use?
 - How do I upgrade our ERPNext installation without breaking customizations?
 
-## Employee/User mode — representative questions (future phase)
+## Employee/User mode — representative questions
 
 - How do I create a Sales Invoice?
 - How do I submit a Purchase Order?
@@ -65,6 +82,8 @@ database schema, framework documentation.
 DocTypes/fields/workflows/scripts/apps, policies, procedures, integration
 docs, deployment docs, troubleshooting guides, architecture docs.
 
-Implementation note: one vector store with a `source_type` metadata tag
-(`public_doc`, `company_doc`, `our_code`, `core_code`), filtered at query
-time — not two parallel systems. See `ARCHITECTURE.md`.
+Current implementation: one vector store with `source_type` metadata;
+indexed types are `public_doc`, `company_doc`, `our_code`, `resolved_issue`.
+`core_code` is reserved, not a delivered corpus. These tags distinguish
+sources, not authenticated ACLs. Site isolation and per-user authorized
+retrieval are target requirements; see `ARCHITECTURE.md` and `SECURITY.md`.

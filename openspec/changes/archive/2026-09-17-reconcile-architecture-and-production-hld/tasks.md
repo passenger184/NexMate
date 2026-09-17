@@ -1,0 +1,38 @@
+## 1. Establish the source-backed documentation baseline
+
+- [x] 1.1 Inspect current diffs before documentation edits and preserve pre-existing user changes; verify the proposed edit set contains only the documentation named in proposal/design, with no runtime, package, deployment, dependency or agent-configuration edits.
+- [x] 1.2 Revalidate the design's concrete source anchors for service/browser flow, seven routes and NLU/task layers, registry, sessions, retrieval, memory, tools, versions, telemetry and package metadata; verify each current HLD claim has a source reference and corrections are recorded rather than silently adopting stale comments.
+- [x] 1.3 Compare `c2e5004:DECISIONS.md` and the `a576c7b` removal diff for the four identified ADRs; verify original text, dates and provenance are available before restoration, and surface any conflict with the exploration findings.
+
+## 2. Make ARCHITECTURE.md the canonical HLD
+
+- [x] 2.1 Rewrite the HLD opening with scope, v16 target, glossary, current/approved-target/unresolved/deferred labels and document ownership; verify no second permanent HLD is introduced and architecture status is distinct from evidence status.
+- [x] 2.2 Add current runtime and request-flow diagrams covering browser direct FastAPI access, Frappe boot/assets, legacy/direct endpoints, seven response routes, Layer-1/Layer-2/task routing and separate read/write tools; verify against the source map and explicitly distinguish troubleshooting kind from response routes and tools.
+- [x] 2.3 Document current hybrid vector/BM25/RRF retrieval, confidence gates, corpus chunking/source types, resolution memory, sessions, version-awareness and telemetry; verify current versus reserved source types and record index freshness/rebuild, grounding, audit and state limits without fixing code.
+- [x] 2.4 Add approved target component/state ownership and trust-boundary diagrams for Browser, Frappe, private FastAPI, ERPNext, knowledge stores, providers and privileged code execution; verify no unresolved placement, tenancy mechanism or authentication protocol is described as accepted.
+- [x] 2.5 Add provider/search architecture coverage for R01-R03 and R16: current LiteLLM/local embeddings/Chroma versus future interfaces, Qdrant/pgvector/search/reranking options, model/index compatibility and site-safe migration; verify portability is a target rather than a false claim about current code.
+- [x] 2.6 Add deployment/release coverage for R04-R07: one source across Bench/Docker, separate inference, Git-to-app-to-test/lint/migrate-to-release/update lifecycle, application versioning, pyproject compatibility and Frappe patch mechanisms; verify current >=15 metadata versus v16 scope is reported without changing it or certifying packaging.
+- [x] 2.7 Add target tool/Desk/context coverage for R09-R14: explicit authorized tool contracts, Frappe-owned history, streaming/realtime, authorized route/DocType/document context, document/history-based answers and policy-filtered Debug information; verify each missing feature is labeled target and generated-query visibility does not imply a new SQL tool.
+- [x] 2.8 Add target security/approval/audit coverage for R08 and R17-R19: authorization before retrieval/execution, site and intra-site isolation, local-default data classes and all-call egress policy, durable proposal/approval/recheck/retry/concurrency/expiry and correlated audit lifecycle; verify LLM output/client mode never establishes authority and audit content is minimized/redacted.
+- [x] 2.9 Add deferred MCP/Developer Workbench coverage for R15/R20, unresolved-decision register and the complete R01-R20 traceability matrix; verify Workbench remains separate from employee chat and every requirement has current/target/deferred/unresolved status plus a future proof obligation.
+
+## 3. Reconcile decisions and document authority
+
+- [x] 3.1 Restore the four removed ADRs in `DECISIONS.md` with original provenance, restoration annotations and explicit supersession where supported; verify restored text against historical revisions and preserve existing later entries without inventing approval.
+- [x] 3.2 Record the user-approved production direction with 2026-09-17 request provenance and separate unresolved choices; verify this records architectural direction, not new production-write authorization, chosen shared tenancy, executor deployment or cloud-data consent.
+- [x] 3.3 Reconcile `ROADMAP.md`, `AGENTS.md`, `PROJECT.md` and historical phase-spec status/reference text: use actual phase 1-8 numbering, historical acceptance with exceptions, NexMate naming, implemented employee mode and approved OpenSpec post-roadmap scope; verify old current-phase prohibitions are not left as competing authority and original historical requirements remain available.
+- [x] 3.4 Reconcile `SECURITY.md` with HLD trust/identity/locality/approval/audit principles and the canonical ADR location; verify policy is distinguished from current enforcement and existing staging, confirmation, root-scoping and production-approval safeguards are not weakened.
+- [x] 3.5 Reconcile targeted supporting references in README, DEVELOPMENT, CHANGELOG, app README and existing UI/future-workspace/launch docs; verify NexMate-facing naming, UI supersession, setup/deployment caveats and document ownership agree without editing runtime identifiers, styles, package metadata or agent configuration.
+
+## 4. Evidence and future migration gates
+
+- [x] 4.1 Publish the HLD evidence matrix and reconcile `progress/CURRENT.md` and `progress/BLOCKERS.md`, with a dated journal entry; verify each claim distinguishes implemented, typed tests, dated live tests, unverified, planned and deferred status and preserves pre-existing user changes.
+- [x] 4.2 Correct contradictory NLU/Bench/Docker/RAGAS claims using existing evidence only; verify incomplete live NLU acceptance remains explicit, historical outages are not presented as current measurements, real API tests are not Bench proof, and RAGAS means include valid-row/self-judge limitations without unsupported causal conclusions.
+- [x] 4.3 Document ordered future migration milestones in ROADMAP/HLD and acceptance methods in EVALUATION for authenticated boundaries, durable state, authorized context/retrieval, site isolation, provider egress, safe writes/audit, deployment parity, version/patch lifecycle and production readiness; verify these are future gates, not tasks to implement or newly passed results in this change.
+
+## 5. Documentation-only acceptance review
+
+- [x] 5.1 Review changed document references, phase/name/status consistency and every R01-R20 coverage row; verify referenced files/sections exist, current facts have evidence and no unresolved option was promoted to an accepted decision.
+- [x] 5.2 Run `openspec validate reconcile-architecture-and-production-hld --type change --strict --no-interactive` and `git diff --check`; inspect tracked and untracked scope, verifying only intended documentation edits and change artifacts were added and no model/service/data/deployment operations occurred.
+- [x] 5.3 Obtain independent read-only review of HLD fidelity, security-policy separation, ADR provenance and acceptance evidence; resolve documentation findings and verify no code fix, production-readiness declaration or new phase completion was used to close this change.
+- [x] 5.4 Update progress with the completed documentation unit and remaining decision/verification blockers only after review; verify runtime migration stays pending, no commit/release/archive is performed without request, and all task completion claims refer to documentation deliverables rather than future features.

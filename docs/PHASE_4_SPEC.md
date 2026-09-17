@@ -1,8 +1,19 @@
 # docs/PHASE_4_SPEC.md — Project Memory
 
-**Do not start until Phase 3's Definition of Done is met** — this phase
-depends on Phase 2's edit tool already producing commits, and Phase 3's
-company-knowledge corpus already existing.
+**Historical Phase 4 requirements, not current build scope.** Functional
+acceptance was recorded 2026-08-24 (`ROADMAP.md`). `ARCHITECTURE.md` is the
+sole canonical HLD; post-roadmap work requires a user-approved OpenSpec
+change. Original requirements and unchecked checklist below are history,
+not a current build instruction or fresh verification claim.
+
+Historical entry gate: Phase 3's Definition of Done had to be met, with
+Phase 2's edit tool producing commits and the company corpus available.
+The original per-user persistence and reopen requirements below are not
+proof of authenticated ownership or browser transcript restoration. Those
+remain future Frappe-owned state/Desk gates in `EVALUATION.md`. Resolution
+memory remains distinct from session history and subject to `SECURITY.md`.
+
+## Original requirements
 
 ## Principle: memory is a corpus, not a new subsystem
 

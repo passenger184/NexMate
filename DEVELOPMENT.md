@@ -1,5 +1,10 @@
 # DEVELOPMENT.md — Environment & Workflow
 
+Development runbook for NexMate. `ARCHITECTURE.md` is the sole canonical
+HLD; `README.md` provides onboarding, `EVALUATION.md` defines acceptance,
+and `progress/` records dated evidence. Commands below describe local
+development, not a certified production deployment.
+
 ## Environment (WSL/Linux)
 
 ```bash
@@ -91,17 +96,40 @@ reinstall of Ollama itself is ever needed to change or add models.
 
 ## Project structure
 
-Each phase's spec doc defines its own deliverable layout (Phase 1:
-`docs/PHASE_1_SPEC.md`; Phase 2 adds `tools/` + `tests/`). Do not add
-directories/services beyond what the current phase requires (e.g., no
-`orchestrator/` folder until Phase 5).
+Historical phase specs preserve their original layouts, not current work
+prohibitions. The accepted sequence was public RAG, code tools, company
+knowledge, memory, ERPNext reads, orchestration, employee mode, and ERPNext
+writes (Phases 1–8). Follow `ROADMAP.md` and the approved OpenSpec change
+for post-roadmap scope; `ARCHITECTURE.md` alone defines the HLD.
+
+## Release and deployment lifecycle — target, not delivered
+
+The approved direction is one NexMate application source for ordinary Bench
+and Docker, with authenticated Frappe control/state ownership and separate
+private inference. Docker packaging, root-repository Bench installation,
+real Desk assets and install/update parity remain unverified; a proxy is
+not a substitute for the target authorization boundary.
+
+Future release gates: Git source -> packaged Frappe app -> tests/lint and
+compatibility checks -> Bench/Docker install/update plus patches/migrate ->
+backup/restore and rollback verification -> explicitly approved release.
+These are future checks, not commands run or gates passed by this document.
+`frappe_app/pyproject.toml` currently uses dynamic versioning from
+`frappe_app/erpnext_ai_copilot/__init__.py` (`0.1.0`) and declares Frappe
+`>=15`, while the product targets v16. The supported version matrix,
+versioning policy and monorepo-to-Bench packaging path remain unresolved;
+normal Frappe patches/migrate are the target migration mechanism.
+See `EVALUATION.md` for acceptance and `docs/OPEN_SOURCE_LAUNCH_SPEC.md`
+for the future launch checklist. Release approval does not authorize
+production writes; `SECURITY.md` still governs them.
 
 ## Running the test set
 
-See `EVALUATION.md` for the question set and how to score answers before
-declaring the phase done.
+See `EVALUATION.md` for the question set, historical phase acceptance and
+future production gates. Test results must identify their date and scope;
+mocked routing or stub-DOM checks are not real Bench/Desk verification.
 
-Unit tests for the code tools run on stdlib only (no extra deps):
+The documented Python discovery command is:
 
 ```bash
 python -m unittest discover -s tests

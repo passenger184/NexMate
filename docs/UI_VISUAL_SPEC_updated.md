@@ -1,11 +1,15 @@
-# docs/UI_VISUAL_SPEC.md — Visual Design Spec (Reference-Matched)
+# docs/UI_VISUAL_SPEC_updated.md — NexMate Canonical Blue Visual Spec
 
-**This supersedes any earlier visual direction.** The current build does
-not match intent — flat panel, no citation pill styling, no diff-card
-treatment, and two competing accent colors (a blue dropdown and an orange
-button) that were never specified anywhere. This doc gives literal values,
-not concepts to reinterpret. Match it exactly. If something here is
-ambiguous, ask — don't improvise a variation.
+**This supersedes `docs/UI_VISUAL_SPEC.md` (historical amber direction)
+and earlier conflicting visual instructions in `docs/UI_SPEC.md`.**
+`docs/UI_SPEC.md` retains interaction/structure ownership;
+`ARCHITECTURE.md` is the sole canonical HLD. This is a visual requirement,
+not evidence of real Bench installation or visual acceptance.
+
+The original mismatch report (flat panel, unstyled citations/diffs, blue
+dropdown and orange button) motivated this revision; it is historical,
+not a fresh observation of today's build. This doc gives literal values,
+not concepts to reinterpret. If something is ambiguous, ask.
 
 ## Non-negotiable: one accent color only
 
@@ -31,8 +35,8 @@ it and replace it with `#2E6FF2` or a neutral.
 ## Component-by-component
 
 **Header**: panel background, no visible border unless a 1px `--border`
-line is needed for separation. Left: small circular icon + "ERPNext
-copilot" in `--text-primary`, medium weight. Right: refresh icon and close
+line is needed for separation. Left: small circular icon + "NexMate"
+in `--text-primary`, medium weight. Right: refresh icon and close
 icon in `--text-muted`, no background/button chrome around them — icons
 alone, hover state only.
 
@@ -91,7 +95,7 @@ bright/filled buttons.
 with `--accent` or any other bright color — it's a neutral control, not a
 call to action.
 
-## What to remove from the current build
+## Historical mismatch checklist — apply only where still present
 
 - The orange "Send" button — replace with the icon-only accent-colored
   arrow described above.
@@ -100,7 +104,11 @@ call to action.
 - Any drop shadows on cards/bubbles — flat surfaces with hairline borders
   only, no shadow.
 
-## Verification before calling this done
+## Future visual acceptance procedure (not verification evidence)
+
+Preview checks do not establish real Desk asset loading or Bench behavior;
+those require separate acceptance under `EVALUATION.md`. Any edit proposal
+used below must retain `SECURITY.md`'s confirmation and Git safeguards.
 
 Reload `GET /ui/preview.html`, hard-refresh, and visually compare against
 this spec component by component — header, message bubbles, citation

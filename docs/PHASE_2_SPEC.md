@@ -1,10 +1,20 @@
 # docs/PHASE_2_SPEC.md — Live Code Read/Edit Agent (Single Project)
 
-**Do not start this until Phase 1's confidence-gating bug is fixed and
-`/test` confirms the DoD in `EVALUATION.md` is actually met — not just
-self-reported.** Read `SECURITY.md`'s "Live code read/edit agent" section
-in full before writing any code for this phase — the guardrails there are
-non-negotiable, not suggestions to weigh against convenience.
+**Historical Phase 2 requirements, not current build scope.** Functional
+acceptance was recorded 2026-08-24; Bench-dependent diff/approval UI remains
+unverified (`ROADMAP.md`). `ARCHITECTURE.md` is the sole canonical HLD;
+post-roadmap work requires a user-approved OpenSpec change. The original
+checklist below is retained, not a new completion or testing claim.
+
+Historical entry gate: Phase 1's confidence-gating bug had to be fixed and
+`/test` had to confirm the DoD in `EVALUATION.md`, not just a self-report.
+Read `SECURITY.md`'s live code read/edit guardrails for standing policy.
+The clean-tree, per-file confirmation and atomic-commit requirements below
+describe the product tool, not this docs-only reconciliation workflow.
+“Phase 7” live writes in the original text below means Phase 8 in the
+accepted sequence. The code/data tool separation remains mandatory.
+
+## Original requirements
 
 ## Scope
 

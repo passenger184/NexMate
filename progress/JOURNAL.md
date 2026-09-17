@@ -668,3 +668,81 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   Purchase Invoices?" -> refined "How do I create a Purchase Invoice in
   ERPNext?" -> high, Purchase Invoice docs, correct PO/supplier steps.
   Telemetry confirms no digit tokens in the refined query.
+
+## [2026-09-17] — documentation reconciliation, progress handoff (Tasks 4.1/4.2)
+
+- Scope: only `progress/CURRENT.md`, `progress/BLOCKERS.md` and this journal
+  under `reconcile-architecture-and-production-hld`. Read proposal, design
+  and tasks, the reconciled `ARCHITECTURE.md`/`ROADMAP.md`/`EVALUATION.md`,
+  existing progress records and uncommitted progress diffs. Evidence basis:
+  HEAD a7676ec plus the working-tree documentation reconciliation; this is
+  source/document reading, not runtime verification or independent review.
+- CURRENT now records the change IN PROGRESS and historical Phase 1–8
+  acceptance with exceptions (2026-08-24), not a current phase or production
+  readiness claim. Corrected stale "not started" phases, universal fallback,
+  BM25 "cannot drift", RAGAS causality and preview-as-Desk overclaims.
+  BLOCKERS now distinguishes pending documentary review from future
+  implementation decisions and verification gates.
+- Historical interpretation annotations: session 10's "ANY failure" applies
+  to the old task-router summary, not the later NLU layer (failed NLU uses
+  strong task heuristics or clarification). Sessions 18–19's "troubleshoot
+  route" wording denotes an NLU kind, not an eighth response route. The
+  29-case evaluation used mocked NLU; reported 145 Python + 26 Node checks
+  are unit/mock and stub-DOM evidence. Session 18's outage is historical,
+  not a current connectivity measurement. Session 19's later successful
+  follow-up does not complete the full live conversational/NLU matrix.
+- Sessions 13–15's browser-testable/UI conclusions refer to the standalone
+  preview and stub-DOM checks, not verified Bench packaging or real Desk.
+  The updated blue visual specification supersedes historical amber UI
+  direction. Bench installation/assets/Desk remain unverified; Docker is
+  planned. Live staging API results are not Bench/Docker delivery evidence.
+- Preserved the user's existing uncommitted RECOVERY 2026-09-09 addition
+  exactly, including artifact names, row details, dates and environment
+  observations. No earlier journal entry was rewritten. That recovery is
+  historical evidence, not a new score run or present provider-health check.
+  Post-hybrid means remain 0.734 faithfulness (8/15), 0.939 relevancy
+  (11/15), 0.564 precision (9/15), versus pre-hybrid 0.992 (12/15),
+  0.941 (15/15), 0.562 (15/15). Changed coverage and self-judging prevent
+  causal attribution: neither harmless judge noise nor regression is
+  established. Q3/Q7/Q11 lows require independent per-question review;
+  stronger judging and held-out cases remain future evidence requirements.
+- Historical counts, installed versions, service availability and staging
+  test-record observations do not establish today's inventory or settings.
+  Session 3's "holds no secrets"/localhost CORS rationale is not current
+  authentication evidence: later ERPNext clients use configured credentials.
+  No credential or live configuration inspection occurred in this pass.
+- Approved production direction means authenticated Frappe control/state
+  ownership and separate private inference. It selects no physical tenancy,
+  executor, protocol or ACL mechanism and grants no production-write or
+  private-data cloud consent. Future contracts and runtime gates remain
+  pending; MCP, Workbench and shared multi-workspace routing stay deferred.
+- Documentary evidence: inspected the scoped diffs and reconciled claims
+  against the HLD evidence matrix and evaluation methods. No tests, lint,
+  model calls/downloads, network probes, runtime/configuration changes,
+  data operations, commits, release or archive. Independent read-only review
+  and final validation/outcome are PENDING with the parent; task checkboxes
+  and HLD publication are outside this file ownership. The parent will
+  append the final review outcome later; no Tasks 5.x completion is claimed.
+
+## [2026-09-17] — documentation reconciliation, final acceptance (Tasks 5.x)
+
+- Documentary acceptance COMPLETE for `reconcile-architecture-and-production-hld`.
+  Two independent read-only content reviews (architecture/HLD fidelity and a
+  fresh review after one earlier reviewer disclosed a /tmp script write
+  outside the repository) plus a security review found no blocking
+  documentation findings. The sole finding (extra blank line at EOF in this
+  journal) was fixed and re-checked.
+- Verification run by the parent: strict OpenSpec change validation
+  (`openspec validate reconcile-architecture-and-production-hld --type
+  change --strict --no-interactive`) PASSES; `git diff --check` PASSES;
+  removal commit `a576c7b` for the four restored ADRs re-verified from Git
+  history. Review coverage included R01–R20 traceability, current-vs-target
+  separation, unresolved-decision register, restored-ADR provenance and
+  preservation of the pre-existing 2026-09-09 RAGAS recovery entry.
+- ALL 24 change tasks are now complete. The change is NOT archived and NOT
+  committed — awaiting explicit user instruction. No runtime, configuration,
+  dependency, deployment, model, service or data operation was performed;
+  historical Phase 1–8 acceptance is not re-run and no production gate is
+  passed. Remaining future gates (live NLU matrix, Bench/Desk/Docker parity,
+  independent RAGAS judging, production contracts U1–U10) stay open in
+  progress/BLOCKERS.md.

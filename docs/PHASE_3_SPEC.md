@@ -1,6 +1,16 @@
 # docs/PHASE_3_SPEC.md — Company Knowledge (This Project)
 
-**Do not start until Phase 2's Definition of Done is met.**
+**Historical Phase 3 requirements, not current build scope.** Functional
+acceptance was recorded 2026-08-24 (`ROADMAP.md`). `ARCHITECTURE.md` is the
+sole canonical HLD; post-roadmap work requires a user-approved OpenSpec
+change. Original requirements and unchecked checklist below are preserved
+as history, not a current implementation task list or fresh test result.
+Company knowledge remains subject to `SECURITY.md`'s local-default and
+explicit cloud-consent rules; ingestion history is not consent.
+
+Historical entry gate: Phase 2's Definition of Done had to be met.
+
+## Original requirements
 
 ## Goal
 
