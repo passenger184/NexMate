@@ -343,3 +343,145 @@ staging-only write decision and all `SECURITY.md` code-edit, confirmation,
 root-scoping, least-privilege and local-default safeguards remain in force.
 Any production-write approval and any specific private-data cloud consent
 must be separately explicit and recorded here; this entry grants neither.
+
+## [2026-09-17] U4 (partial): shared-secret service authentication for the Frappe-to-inference boundary
+
+**Status:** Accepted for the service-to-service authentication mechanism
+only. This resolves the authentication-transport subset of U4 (service
+authentication and identity propagation). The remaining U4 scope —
+tool/result contracts, provider conformance, streaming/realtime transport,
+version negotiation — stays unresolved. This decision does NOT by itself
+satisfy migration gate G2/M2: user authorization, permission enforcement
+before retrieval/execution, and owned state remain future work.
+
+**Provenance:** User decision of 2026-09-17 while planning the
+`authenticated-frappe-control-plane` OpenSpec change (planning artifacts in
+`openspec/changes/authenticated-frappe-control-plane/`). Planning
+authorization only; no implementation, deployment or test execution is
+approved by this entry.
+
+**Decision:**
+- Shared secret service credential, transmitted as the `X-NexMate-Key`
+  HTTP header on requests from the Frappe control plane to the private
+  FastAPI inference service.
+- Secret configured through environment configuration on the inference
+  side (`.env`) and site configuration on the Frappe side
+  (`site_config.json`); never hardcoded, never sent to the browser, never
+  present in boot data or client storage.
+- Production configuration fails closed: requests with a missing or
+  invalid credential are rejected, and an unconfigured secret rejects all
+  requests rather than permitting unauthenticated access.
+- The existing standalone `/ui` local development workflow is preserved
+  only through an explicit development-only configuration flag, default
+  off; there is no implicit authentication bypass in production.
+- No mTLS and no signed-request infrastructure in this change; the
+  mechanism is the shared-secret header alone.
+
+**Alternatives considered:** mTLS (rejected for this change: certificate
+infrastructure disproportionate to the first boundary increment);
+per-request cryptographic signatures (rejected: added complexity without
+a current threat need); forwarding Frappe session cookies to inference
+(rejected: couples the private service to Frappe session semantics and
+does not establish a service identity).
+
+**Consequences:** Constant-time credential comparison; rotation is a
+documented configuration change. The secret authenticates the control
+plane, not the end user: user identity and site travel with the request
+and are recorded by inference, but authorization decisions remain Frappe
+responsibilities delivered by later approved work. The related unresolved
+choices — developer-mode privilege mapping, session/state behavior in the
+authenticated increment, and which direct tool operations remain available
+— are pending user decisions recorded in the change's design.md, not
+silently defaulted here.
+
+## [2026-09-17] Authenticated boundary: resolved planning choices and conditional implementation approval
+
+**Status:** Accepted bounded decisions; subsequent implementation approved
+once planning is internally consistent and strictly validated. This entry
+records planning, not implementation, test completion or deployment.
+
+**Provenance:** The user's explicit 2026-09-17 instruction to update planning
+only for `authenticated-frappe-control-plane`, restricted to existing change
+files, this ledger and ROADMAP.md. The user resolved the four pending points,
+required backend natural-language tool denial and identity/site validation,
+and approved implementation after plan consistency and strict validation.
+The present pass does not execute that implementation authorization.
+
+**Decision:**
+- Use server-managed `nexmate_developer_roles`, default `[]`; no broad
+  System Manager default or implicit Administrator elevation. The actual
+  authenticated Frappe user's roles determine persona; browser mode does
+  not. Persona grants neither tool permissions nor corpus/session ownership.
+- Preserve optional legacy `session_id` forwarding strictly as temporary
+  continuity, not authentication, authorization, ownership or site isolation.
+  Leave JSON storage unchanged here. Immediately after this bounded boundary
+  is verified, require separately approved `frappe-owned-conversation-state`
+  covering Frappe records, user ownership, site association, persistence,
+  removal of caller-controlled ownership, JSON replacement and a migration/
+  compatibility strategy. Its implementation is not included or approved here.
+- Keep the gateway chat-only. No read/search/explain/file/code/Git/business
+  tools, proposals, approvals or reset through it. Enforce an immutable
+  empty tool allowance in backend code before execution, including natural
+  language routing, troubleshooting, follow-ups, fallbacks and incidental
+  ERPNext version reads. Disabling slash commands or relying on the model
+  does not satisfy this decision. Existing cited RAG is not live file search
+  and does not become ACL retrieval; no new private-corpus grants are made.
+- Desk makes no direct inference calls, including reset, stale approval/
+  rejection handlers and failures. Start-fresh is local transcript clearing
+  plus a fresh local identifier, not server deletion or ownership. Preserve
+  legacy endpoints only behind credentials or explicit development access,
+  with existing confirmation/write/locality safeguards unchanged.
+- Exact `/health` is unauthenticated minimal liveness, even with key unset
+  or invalid. It exposes no sensitive diagnostics, configuration, user/site
+  or business data and does not establish protected-service readiness.
+- Retain server-only `X-NexMate-Key`, inference environment
+  `NEXMATE_SERVICE_KEY` and Frappe site `nexmate_service_key`. Require a
+  strong random credential and constant-time comparison. Exclude keys and
+  transport headers from logs, telemetry, prompts, boot/client storage,
+  bundles and error responses; do not relay browser headers or follow
+  credential-bearing redirects. Frappe missing-key errors never use bypass.
+- Protected production requests fail closed on missing/invalid credentials
+  or unset/invalid configuration. Development exemption is explicit,
+  default off and configuration-only, never request/origin/Host/forwarded/
+  localhost heuristics. Invalid supplied credentials remain rejected in dev.
+- Validate complete gateway user/site/mode/scope before history, retrieval,
+  routing or execution. Require valid service authentication even when dev
+  exemption is enabled; partial envelopes cannot downgrade to legacy calls.
+  Bind site to one trusted server-configured expected site. Only validated
+  metadata receives attributed telemetry; recording is not validation or
+  per-user authorization. This remains single-project with no tenant/root
+  registry, site-isolated index or selected physical tenancy topology.
+
+**Implementation-level planning choices:** `NEXMATE_ENV` defaults to
+`production`; only exact `development` together with
+`NEXMATE_DEV_UNAUTHENTICATED=1` permits missing-header development requests.
+A valid or unset configured key is allowed in that explicit development
+case; a malformed configured key or supplied invalid credential is not.
+Unknown environments or invalid flag values never enable exemption. The
+planned strong-key representation is 64 hexadecimal characters generated
+from at least 32 random bytes. Proposed `NEXMATE_FRAPPE_SITE` is the fixed
+expected site, not a routing key. Bounded nonempty user/site strings reject
+Guest, control characters and edge whitespace; design.md defines the full
+truth table and envelope. These configuration/validation choices implement
+the approved constraints, not a new topology or broad U4 selection.
+
+**Context and alternatives:** Earlier drafts simultaneously recorded the
+four decisions and left contradictory pending questions, universal health
+denial and UI-only tool restrictions. Stateless gateway/session stripping,
+broad administrator role defaults, authenticated health and tool proxying
+are not selected. A single dev flag or traffic-derived exception would not
+satisfy the production-default constraint. Telemetry-only identity and
+model-only tool denial do not establish the requested boundary.
+
+**Consequences and supersession:** This entry supersedes only the preceding
+U4 entry's planning-only approval status, pending four choices, and literal
+"all requests" denial insofar as it contradicts minimal public health and
+the explicit dual-opt-in development exception. Historical ADR text remains
+unchanged. No mTLS or signing is introduced. Remaining U4 tool/result and
+provider contracts, version negotiation and streaming/realtime remain
+unresolved, as do other affected HLD gates. Legacy JSON and non-ACL retrieval
+remain explicit limitations; this increment does not complete G2/M2 or
+establish safe multi-user deployment. No release, production-write approval,
+private-data cloud consent, live test/model call or successor implementation
+is authorized by this planning entry. Stop and ask if an additional
+substantive user choice is discovered before dependent implementation.

@@ -176,6 +176,23 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   ABORTED mid-run by user order: Phase 1 is functionally complete enough;
   drop bench install + re-score. Samples file kept so a future session
   can score it directly without regenerating (command in CURRENT.md).
+
+  **RECOVERY 2026-09-09 (session 20):** the scoring phase had in fact
+  COMPLETED on 2026-09-08 — `data/ragas_baseline_2026-08-24T11:32:30Z_124955.json`
+  exists with timestamp 2026-08-24T11:32:30Z, but no session ever logged it.
+  Verified before recording: (1) result rows match the samples file
+  row-by-row (questions, answers, contexts, ground_truth all identical);
+  (2) means recomputed from raw rows = stored values exactly (0.734/0.939/
+  0.564). Env confirmed reproducible: ragas 0.2.15, .venv-eval Python
+  3.12.14, judge qwen2.5-coder:7b reachable via OLLAMA_BASE_URL,
+  bge-small embeddings cached. NO new score run was needed — the artifact
+  was complete; it was a logging gap, not a scoring gap. Per-row detail:
+  faithfulness 8/15 valid (5×1.0, Q3 0.0, Q7 0.5, Q11 0.375; Q12–Q15 all
+  NaN = judge JSON-parse failures on the small local judge); answer
+  relevancy 11/15 (Q12–Q15 NaN); context precision 9/15 (Q10–Q11, Q12–Q15
+  NaN). Pre-hybrid for comparison: 0.992 (12 valid) / 0.941 (15) / 0.562
+  (15). CURRENT.md RAGAS section rewritten with the post-hybrid table as
+  the recorded baseline.
 - Researcher-subagent invocation for the runbook failed twice with
   provider network errors; fell back to direct read-through of the
   evaluation harness instead (same outcome, no code risk encountered).
@@ -746,3 +763,145 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   passed. Remaining future gates (live NLU matrix, Bench/Desk/Docker parity,
   independent RAGAS judging, production contracts U1–U10) stay open in
   progress/BLOCKERS.md.
+
+## [2026-09-17] — authenticated boundary documentation/evidence handoff
+
+- Scope: README.md, DEVELOPMENT.md, progress/CURRENT.md, this journal and
+  `openspec/changes/authenticated-frappe-control-plane/tasks.md` only.
+  Read all five before editing; inspected proposal/design/three delta specs,
+  appended ADR provenance, current config/auth/service/orchestrator/gateway/
+  boot/bundle source and synthetic tests. Source basis is HEAD `3e060c3`
+  plus the uncommitted boundary implementation, not a released artifact.
+- README and DEVELOPMENT now distinguish authenticated chat-only Desk from
+  legacy credential-gated APIs and dual-opt-in preview. Documented all
+  inference/site configuration names/defaults, 64-hex non-repetitive key
+  strength shape versus randomness, exact fixed site binding, empty role
+  mapping without implicit admin elevation, and numeric `(0,900]` read
+  timeout (300-second default, 5-second connect timeout), not total duration,
+  cancellation or retries. Blank example-key assignment must be replaced
+  or removed, not confused with unset. No real configuration was inspected.
+- Documented public minimal `/health` versus readiness, sanitized failures
+  without fallback, unavailable Desk tools/cards, local-only start-fresh,
+  ignored stale responses without server cancellation, and unchanged
+  transitional JSON sessions without ownership or ACL proof. The successor
+  `frappe-owned-conversation-state` remains separately approved future work,
+  not implemented: persistent Frappe records, user ownership, site association,
+  caller-controlled ownership/JSON replacement and migration/compatibility.
+- Supplied 2026-09-17 evidence, not rerun here: project `.venv` offline
+  unittest discovery 190 tests OK with dotenv disabled and integrations
+  mocked; Node harness 64 checks (26 preview + 38 Desk); syntax checks pass.
+  Preliminary system `python3` discovery had 13 import failures with the
+  wrong interpreter, superseded by the successful `.venv` run. Test sources
+  are `tests/test_service_auth.py`, `tests/test_chat_boundary.py`,
+  `tests/test_frappe_gateway.py` and the bundle harness. These are unit/mock/
+  local-fixture and stub-DOM results, not live model or real Bench evidence.
+- Marked 17/21 tasks checked from source plus supplied evidence: 2.1–2.3,
+  3.1–3.5, 4.1–4.2, 5.1–5.3, 6.2, 6.4 and 7.1–7.2. Route inventory remains
+  present in the service diff and inventory fixture. Rollback review is
+  source/test-based: retain the inference gate and chat-only guard or disable
+  Desk; synthetic mismatch/sanitized failure evidence is not an executed
+  deployment rotation or rollback. No production bypass is a recovery path.
+- Open tasks: 1.1 needs parent confirmation of validation chronology before
+  implementation; 6.1 lacks user-supplied lint/typecheck commands (none found
+  in the runbook/build metadata); 6.3 lacks authorized real Bench/Desk
+  integration, including authentication/CSRF and assets; 7.3 awaits actual
+  post-verification successor handoff. Parent final security and OpenSpec
+  implementation reviews are still pending. No all-complete, full G2/M2,
+  phase, production, release/write, ownership/ACL or cloud-consent acceptance.
+- Documentary checks in this pass: strict OpenSpec validation
+  (`openspec validate authenticated-frappe-control-plane --type change
+  --strict --no-interactive`) and `git diff --check` passed. These structural
+  checks are distinct from the pending final reviews. No runtime-test rerun,
+  model/network/live service/deployment call, actual `.env` access, data
+  mutation, new file, staging, commit or archive was performed.
+- Preserved pre-existing CURRENT reconciliation/evidence and all previous
+  journal entries, including the exact September 9 RAGAS recovery. Historical
+  reconciliation was archived in `10d6c8e` under
+  `openspec/changes/archive/2026-09-17-reconcile-architecture-and-production-hld/`;
+  earlier unarchived/uncommitted statements describe that earlier handoff,
+  not the active authenticated-boundary change.
+
+## [2026-09-17] — authenticated boundary final bounded-review update
+
+- Continuation scope: only progress/CURRENT.md, this journal and
+  `openspec/changes/authenticated-frappe-control-plane/tasks.md`; README/DEVELOPMENT
+  were already updated in the earlier handoff. Read all three before editing,
+  re-checked the wording-fix sources (`orchestrator.py:366/382/406`,
+  `tests/test_chat_boundary.py:236`) and prior progress records.
+- Parent-reported review outcomes, 2026-09-17: strict OpenSpec validation
+  before runtime implementation independently confirmed (task 1.1 checked);
+  final read-only security review found no blocking finding; OpenSpec
+  verification mapped 18 requirements and 51 scenarios, retaining
+  incomplete-acceptance warnings. Recorded as completed bounded reviews —
+  documentation/security/verification coverage only, not overall change
+  acceptance and no fresh full pass of future runtime gates.
+- Wording-fix evidence recorded as parent-reported: the last
+  clarification/out-of-scope wording warning was fixed with scope-aware
+  guidance and the additional regression test; the full project `.venv`
+  rerun exited OK afterwards and the Node harness passed. The exact latest
+  executed count is not inferred from source in this pass; 190 Python /
+  64 Node remains the dated historical first full pass. No runtime suite
+  was rerun by this documentation continuation.
+- Task status: 18/21 checked (1.1 added). 6.1 stays unchecked — no
+  applicable lint/typecheck commands were found in the runbook or build
+  metadata and the user has not supplied any. 6.3 stays unchecked — no
+  authorized real Bench/Desk integration evidence exists. 7.3 stays
+  pending: the actual successor handoff follows verification; no new change
+  was created and `frappe-owned-conversation-state` remains unimplemented.
+- This pass performed no code/config edits, runtime-test reruns,
+  model/network/service/deployment calls, `.env` access, data mutation,
+  staging, commit or archive. Historical entries, including the September 9
+  RAGAS recovery, are preserved unchanged.
+
+## [2026-09-17] — authenticated boundary acceptance completion and authorized handoff (Tasks 6.1/7.3)
+
+- Scope: only DEVELOPMENT.md, progress/CURRENT.md, this journal and
+  `openspec/changes/authenticated-frappe-control-plane/tasks.md`. All four
+  read before editing; all prior entries preserved unchanged. No code,
+  configuration, dependency, runtime-test, model, network, service,
+  deployment or data action; the target repository's `.env` was not read.
+- User-supplied acceptance-session evidence, rerun by nobody in this pass:
+  offline `PYTHON_DOTENV_DISABLED=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+  LITELLM_LOCAL_MODEL_COST_MAP=True .venv/bin/python -m unittest discover
+  -s tests` → **191 tests OK in 1.628s** with a Starlette/httpx deprecation
+  warning and no dependency changes; Node harness 64/64 (26 preview + 38
+  Desk); `node --check` clean for bundle and harness.
+- Tooling inspection (user-supplied): root/nested pyproject/package
+  metadata, Makefiles, tasks, CI, scripts and documentation show Python
+  lint, Python typecheck, JavaScript lint and JavaScript typecheck each
+  **not configured**. Nested `frappe_app/pyproject.toml` is packaging only;
+  `.opencode` dependencies are agent tooling, not application tooling. Per
+  explicit user acceptance, task 6.1 closes on this not-configured basis
+  (not passed lint); no tooling stack is invented or installed.
+- Bench-environment inspection (user-supplied): a Bench exists at
+  `/home/passenger/projects/frappe_docker/development/frappe-bench` with
+  apps `crm`/`erpnext`/`frappe`/`hrms` and `sites/development.localhost`,
+  but no `erpnext_ai_copilot` app directory; `bench`, `chromium` and
+  `google-chrome` absent from PATH; `ss` showed only DNS listeners, not app
+  listeners; bounded no-proxy curl to `http://127.0.0.1:8081` exited 7
+  (connection refused, HTTP 000); `docker ps`/`version`/`compose` could not
+  execute `/usr/bin/docker` (Input/output error), so container status cannot
+  be determined from that CLI — not evidence of no containers globally. No
+  install/start/config/migration/login/browser/model/ERP-data actions.
+- Credential note: the operator shell read the adjacent `frappe_docker`
+  `.env` through name-filtered output (nonsecret values visible, not
+  reproduced here); the target repository's actual `.env` was not read; no
+  credential use or change occurred.
+- Security/scope status: the prior read-only security review (no blocking
+  finding) and the latest independent final scope review (no out-of-scope
+  runtime/dependency work) are recorded, not rerun.
+- Task 7.3 closed by explicit user authorization as handoff ONLY despite
+  pending Bench verification: the next milestone requires the separately
+  approved `frappe-owned-conversation-state` change — Frappe-owned
+  persistent records, authenticated user ownership, site association,
+  persistence across inference restarts, removal of caller-controlled
+  session ownership, explicit migration/compatibility strategy and eventual
+  removal of the JSON store. Nothing was scaffolded or implemented. Task
+  status: **20/21 complete; only 6.3 remains open** (all real
+  authentication/CSRF, Desk actions, assets, preview and minimal-health
+  integration checks unverified; synthetic tests do not substitute).
+  This acceptance/handoff is not full G2/M2, production readiness, owned
+  state, ACL isolation, release/production-write approval or private-data
+  cloud consent. No tests, lint/typecheck installs, network/runtime changes,
+  staging, commit or archive were performed by this pass. Strict OpenSpec
+  change validation and `git diff --check` re-run clean after these edits.

@@ -1,10 +1,195 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-08 (session 18: NexPilot conversational-orchestration continuation — eval harness fixed, thin-followup anchoring, NLU fail-fast budget, 133 tests green)
-**Current phase:** Roadmap complete (Phases 1–8 functionally done) — UI matches UI_SPEC structure + UI_VISUAL_SPEC visuals and is testable in-browser
-**Current task:** NexPilot conversational redesign (uncommitted work in progress): Layer-1 exact fast-path + Layer-2 NLU routing, capability registry, clarify/scope/troubleshoot routes, degraded-LLM path. Eval suite 29/29 green with mocked NLU; live NLU verification BLOCKED (Ollama unreachable from this box — see session 18).
+**Last updated:** 2026-09-17 — `authenticated-frappe-control-plane` user-authorized bounded acceptance/handoff recorded: 20/21 tasks complete; only real Bench/Desk verification (6.3) remains open.
+**Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
+**Current task:** Documentation-only acceptance completion in DEVELOPMENT.md, this file, JOURNAL.md and the change's tasks.md. Tasks 6.1 and 7.3 closed by explicit user authorization; no runtime changes, test reruns or successor creation.
+
+## 2026-09-17 authenticated boundary — implementation and bounded evidence
+
+Source basis: HEAD `3e060c3` plus the uncommitted boundary implementation,
+read on 2026-09-17. The user supplied the offline execution results below;
+this documentation pass inspected source/tests, not live services or secrets.
+
+- `config.py:16` and `service/auth.py:30`: production-default credential gate
+  on all current direct endpoints, assets, docs, unknown paths and OPTIONS.
+  Exact `/health` is fixed public minimal liveness, not readiness. The
+  64-hex key must be non-repetitive; this is strength-shape validation, not
+  proof of random generation. Only both exact development settings permit
+  missing-header requests with valid/unset key. Blank remains invalid,
+  including the copied `.env.example` assignment; see DEVELOPMENT.md.
+- `frappe_app/erpnext_ai_copilot/api.py:116`: non-guest chat gateway derives
+  user/site from Frappe and persona from explicit `nexmate_developer_roles`
+  (default `[]`, no implicit admin elevation). Server-only key/destination;
+  fixed chat-only envelope, sanitized failures, no redirect or direct-browser
+  fallback. Configured read timeout is numeric `(0,900]`, default 300 seconds,
+  with a 5-second connect timeout; not total duration, cancellation or retry.
+- `service/auth.py:75`, `service/main.py:572`: authenticated complete envelope
+  and exact `NEXMATE_FRAPPE_SITE` check precede history/routing/retrieval;
+  malformed envelopes cannot downgrade to legacy, even under dev exemption.
+- `orchestrator.py:862`, `service/main.py:656`: request-local `chat_only`
+  blocks code/ERPNext dispatch before entry in both personas, including
+  troubleshooting, rewritten follow-ups and degraded routing. Incidental
+  version calls are suppressed; conversational/cited cached RAG remains.
+  This is not ACL-aware retrieval or a new corpus permission grant.
+- `frappe_app/public/js/copilot.bundle.js:360`: Desk chat uses Frappe only;
+  mode override, slash tools and stale approval/rejection controls are
+  unavailable. Start-fresh clears locally and replaces the session ID, with
+  no JSON deletion request. Old responses are ignored, not cancelled.
+  Preview remains a separate dual-opt-in legacy workflow without a key.
+- Optional legacy sessions still forward unchanged to JSON storage. Site
+  validation is not authenticated history ownership or site-isolated storage.
+  Standard Frappe authentication/CSRF integration is not proven by mocked
+  Frappe or stub-DOM tests. Do not deploy this as multi-user/production-ready.
+
+| First full-pass evidence supplied for 2026-09-17 (before wording fix) | Result and limitation |
+|---|---|
+| `.venv` offline `python -m unittest discover -s tests`, dotenv disabled, model/network mocked | 190 tests OK; includes auth matrix, gateway and dispatch negatives. Unit/mock/local fixture evidence, not live model or Bench proof. |
+| `node frappe_app/public/js/copilot.bundle.test.js` | 64 checks pass: 26 preview + 38 Desk, stub-DOM/fetch fixtures only. |
+| Syntax checks | Reported pass, including bundle syntax; not lint/typecheck. |
+| Strict OpenSpec validation and `git diff --check` | Reported pass; structural/documentary checks, not final implementation/security acceptance. |
+| Preliminary system `python3` run | 13 import failures with the wrong interpreter; superseded by successful project `.venv` discovery, not hidden or counted as runtime defects. |
+
+Artifacts are the supplied execution report and inspected test sources:
+`tests/test_service_auth.py`, `tests/test_chat_boundary.py`,
+`tests/test_frappe_gateway.py`, and the Node harness. No new result artifact
+or runtime run was created here. Source/test review supports rollback only
+by retaining authentication/chat-only enforcement or disabling Desk chat;
+synthetic key mismatch and sanitized gateway failures are not a deployed
+rotation or rollback exercise.
+
+Latest parent-reported evidence, 2026-09-17: strict validation before runtime
+implementation was independently confirmed (task 1.1 checked). Final read-only
+security review found no blocking finding. OpenSpec verification mapped
+18 requirements and 51 scenarios, retaining incomplete-acceptance warnings.
+These bounded reviews are complete, not overall acceptance.
+
+The last clarification/out-of-scope wording warning was fixed with
+scope-aware guidance (`orchestrator.py:366`, `:382`, `:406`) and the additional
+`tests/test_chat_boundary.py:236` regression test. The parent reports the full
+project `.venv` rerun exited OK after that fix and the Node harness passed.
+This continuation records a full rerun passed after the additional wording
+test, without inferring an exact executed test count from source. The
+190 Python / 64 Node counts above remain the historical first full pass.
+No runtime suite was rerun by this documentation continuation.
+
+User-supplied 2026-09-17 acceptance-session evidence (this pass reran
+nothing): offline command `PYTHON_DOTENV_DISABLED=1 HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1 LITELLM_LOCAL_MODEL_COST_MAP=True .venv/bin/python
+-m unittest discover -s tests` returned **191 tests OK in 1.628s**, with a
+Starlette/httpx deprecation warning and no dependency changes. The Node
+harness passed 64 checks (26 preview + 38 Desk); `node --check` passed for
+both bundle and test harness. The user-supplied tooling inspection covered
+root/nested pyproject/package metadata, Makefiles, tasks, CI, scripts and
+documentation: Python lint/typecheck and JavaScript lint/typecheck are each
+**not configured**; nested `frappe_app/pyproject.toml` is packaging only,
+and `.opencode` package dependencies are agent tooling, not application
+lint/typecheck tooling. Per explicit user acceptance, task 6.1 is complete
+on this not-configured basis — reported as not configured, not passed.
+Syntax checks are not lint/typecheck. Do not invent or install a tooling
+stack for this acceptance.
+
+User-supplied 2026-09-17 Bench-environment inspection: a Bench exists at
+`/home/passenger/projects/frappe_docker/development/frappe-bench` with apps
+`crm`, `erpnext`, `frappe`, `hrms` and `sites/development.localhost`, but no
+`erpnext_ai_copilot` app directory. `bench`, `chromium` and `google-chrome`
+were absent from PATH; `ss` showed only DNS listeners, not app listeners;
+the bounded no-proxy curl to `http://127.0.0.1:8081` returned exit 7,
+connection refused, HTTP 000. `docker ps`/`version`/`compose` could not
+execute `/usr/bin/docker` (Input/output error), so container status cannot
+be determined from that CLI — this is not evidence of no containers
+globally. No install, start, configuration, migration, login, browser,
+model or ERP-data action was performed. Task 6.3 therefore remains
+unchecked: all real authentication/CSRF, Desk actions, assets, preview and
+minimal-health integration checks are unverified; synthetic tests do not
+substitute. In the same session the operator shell read the adjacent
+`frappe_docker` `.env` through name-filtered output; nonsecret values were
+visible and are not reproduced, and the target repository's actual `.env`
+was not read. No credentials were used or changed.
+
+Security status: the prior read-only security review found no blocking
+finding and is not rerun; the latest independent final scope review found
+no out-of-scope runtime/dependency work. Tasks 6.1 and 7.3 are closed by
+explicit user authorization in this acceptance session. Task 7.3 is the
+authorized handoff ONLY — it creates and implements nothing. The next
+milestone requires the separately approved `frappe-owned-conversation-state`
+change: Frappe-owned persistent records, authenticated user ownership, site
+association, persistence across inference restarts, removal of
+caller-controlled session ownership and the JSON store, and an explicit
+migration/compatibility strategy. Task status: **20/21 complete; only 6.3
+remains open** (unverified real Bench/Desk integration). This handoff is
+not full G2/M2, production readiness, owned state, ACL isolation,
+release/production-write approval or private-data cloud consent. No live
+model/network/test/deployment calls, data mutation, staging, commit or
+archive occurred in this documentation pass.
+
+Historical reconciliation was archived under
+`openspec/changes/archive/2026-09-17-reconcile-architecture-and-production-hld/`
+in commit `10d6c8e`. Earlier unarchived/uncommitted statements below describe
+that earlier handoff, not the active boundary. Pre-existing CURRENT evidence
+and the September 9 JOURNAL recovery are retained. The prior conversational
+redesign (`a7676ec`) used mocked NLU; its full live NLU matrix remains
+incomplete and its historical provider outage is not today's health.
+
+## 2026-09-17 documentation reconciliation (Tasks 4.1/4.2) — status and corrections
+
+Docs-only, source-read-only pass under the approved change
+`reconcile-architecture-and-production-hld`. No runtime, test, model-call,
+network or data activity. At this handoff, independent review (Tasks 5.x)
+was pending; it is now complete as recorded in the final acceptance journal entry.
+Historical evidence below is retained, with obsolete current-state summaries
+corrected and historical limitations annotated. Phase 1–8 tables and checked
+DoD items report 2026-08-24 acceptance, not fresh verification. Source basis:
+working-tree HLD/ROADMAP/EVALUATION at HEAD a7676ec plus uncommitted
+reconciliation; no runtime artifact was regenerated. Per those documents:
+
+- **Live NLU acceptance remains incomplete.** The 29-case routing eval
+  used MOCKED NLU; sessions 18–19 report unit/mock Python and stub-DOM
+  Node checks (latest aggregate 145 Python + 26 Node, recorded by the
+  2026-09-09 status update) and only limited live checks. The full live
+  conversational/NLU matrix required by
+  `EVALUATION.md` (exact fast paths, non-exact conversation, capability,
+  clarify, out-of-scope, troubleshoot, all three task routes, follow-ups,
+  mode restrictions, provider timeout/invalid-output paths) has never been
+  run live. Session 18's Ollama unreachability is a dated 2026-09-08-era
+  observation, NOT a current connectivity measurement.
+- **"Troubleshoot route" is shorthand, not architecture.** Troubleshoot is
+  an NLU kind (`orchestrator.py:174`), not an eighth response route; the
+  seven routes are erpnext/code/rag/smalltalk/capability/clarify/
+  out_of_scope (`service/main.py:224`).
+- **"BM25 can never drift" was inaccurate.** The lexical snapshot is taken
+  once per process (`rag/keyword_index.py:209`) and is not refreshed after
+  later ingestion/resolution insertions, so it can go stale relative to the
+  vector store; global corpus statistics also feed the confidence gates.
+- **RAGAS causality wording corrected.** The 0.992→0.734 faithfulness
+  comparison mixes changed valid-row coverage (12→8) with a self-judge; it
+  can be neither dismissed as harmless judge noise nor read alone as a
+  grounding regression. Means are reported with valid-row counts and
+  self-judge limitations; independent judging and per-question review are
+  the future evidence requirement (`EVALUATION.md`).
+- **Bench/Docker/UI status.** All sidebar/UI verification to date is
+  standalone-preview plus stub-DOM harness work on this box. Real Bench
+  installation, packaged-asset injection and Desk behavior are unverified;
+  Docker is planned, not delivered. "Testable in-browser" always meant the
+  service-served `/ui` preview, not Desk. Live API/ERPNext tests
+  (2026-08-24) are not Bench deployment evidence.
+- **Counts and versions are dated.** Corpus counts (1,000 pages cached,
+  7,410 public / +321 project chunks) and Frappe 16.31.0 / ERPNext 16.32.3
+  describe the 2026-08-24-era runs, not current inventory or connectivity.
+- **Direction vs choice vs consent.** The user-approved 2026-09-17
+  production direction (authenticated Frappe control plane + separate
+  private inference) is recorded in `DECISIONS.md`; it selects no tenancy,
+  executor, protocol or ACL implementation, grants no production-write
+  approval and no private-data cloud consent.
 
 ## Session 13 — UI completion (docs/UI_SPEC.md)
+
+> 2026-09-17 annotation: dated 2026-08-24 record. "Testable in a browser"
+> meant this box's standalone `/ui` preview served by the service; "same
+> bundle a bench injects" describes source identity of the asset file, not
+> verified Bench packaging. Real Desk injection, transcript restoration,
+> streaming/realtime remain unverified target work (ARCHITECTURE.md). The
+> Session 15 rebuild to `docs/UI_VISUAL_SPEC_updated.md` (canonical blue)
+> supersedes the visual direction of this era.
 
 The Phase-1 sidebar was rebuilt as a self-contained vanilla-JS bundle:
 slide-out resizable right panel with header (mode switch developer/
@@ -95,26 +280,41 @@ Phase 1 is accepted as functionally complete. Two verification items were
 consciously deferred, NOT silently skipped:
 - **Real-bench sidebar install** — impossible on this box; app code complete
   and untested against a live bench.
-- **RAGAS re-score post-hybrid-retrieval** — generation phase DID complete
-  against the new pipeline (`data/ragas_samples_2026-08-24T11:32:30Z.json`,
-  15/15 answered at high confidence); the scoring phase was aborted mid-run
-  by user order. A future session can score that file directly with
-  `.venv-eval/bin/python -m evaluation.ragas_eval score <file>` (~40 min)
-  without regenerating. The 2026-08-23 baseline below remains the recorded
-  baseline.
+- **RAGAS re-score post-hybrid-retrieval** — RECOVERED 2026-09-09: the
+  scoring phase had in fact COMPLETED on 2026-09-08
+  (`data/ragas_baseline_2026-08-24T11:32:30Z_124955.json`, verified
+  against the samples file row-by-row: questions, answers, contexts,
+  references all match). It was never logged — CURRENT.md still said
+  "aborted mid-run". Judge = same local qwen2.5-coder:7b, embeddings =
+  bge-small. The 2026-08-23 pre-hybrid table is kept below for
+  comparison; the post-hybrid table is now the recorded baseline.
 
 ## RAGAS baseline (EVALUATION.md requirement)
 
-Scored 2026-08-23 (pre-hybrid-retrieval), judge = same local
+Scored 2026-09-08 on the post-hybrid 2026-08-24 samples (hybrid retrieval +
+grounding net + confidence gates), judge = same local
 qwen2.5-coder:7b that generates (self-judging approximation), embeddings =
-bge-small. Samples: `data/ragas_samples_2026-08-23T09:04:28Z.json`; results:
-`data/ragas_baseline_2026-08-23T09:04:28Z_094756.json`.
+bge-small. Samples: `data/ragas_samples_2026-08-24T11:32:30Z.json`; results:
+`data/ragas_baseline_2026-08-24T11:32:30Z_124955.json` (recomputed + verified
+row-by-row against samples 2026-09-09; means match stored values exactly).
 
 | Metric | Score | Notes |
 |---|---|---|
-| Faithfulness | **0.992** | 12/15 rows valid; 3 NaN = judge JSON-parse failures (all on weak-retrieval rows), not low scores. Answers are supported by context. |
-| Answer relevancy | **0.941** | 15/15 valid. |
-| Context precision | **0.562** | Weak on the OLD retriever (override-controller 0.12). Hybrid retrieval should raise this — NOT yet re-scored; treat as stale pending a rerun. |
+| Faithfulness | **0.734** | 8/15 valid; 7 NaNs reported as judge parse failures, not zero scores. Pre-hybrid 0.992 had 12/15 valid. Changed coverage and self-judging prevent causal attribution; Q3/Q7/Q11 lows require review, not dismissal as noise. |
+| Answer relevancy | **0.939** | 11/15 valid versus pre-hybrid 0.941 (15/15); similar means do not establish unchanged quality. |
+| Context precision | **0.564** | 9/15 valid versus pre-hybrid 0.562 (15/15); changed coverage limits comparison. |
+
+2026-09-17 interpretation correction: the earlier claim that the faithfulness
+change reflected judge failures rather than worse grounding was unsupported.
+Neither harmless judge noise nor a regression is established by these means.
+Independent judging, per-question source review and held-out cases remain
+pending. The recovered results and dates are retained; no rerun occurred.
+
+Pre-hybrid baseline for comparison (scored 2026-08-23, samples
+`data/ragas_samples_2026-08-23T09:04:28Z.json`, results
+`data/ragas_baseline_2026-08-23T09:04:28Z_094756.json`): faithfulness
+0.992 (12/15 valid), answer relevancy 0.941 (15/15), context precision
+0.562 (15/15).
 
 Harness lives in `evaluation/` (two-phase: generate in main venv, score in
 `.venv-eval` Python 3.12 — ragas 0.2.x is incompatible with this machine's
@@ -126,9 +326,11 @@ Root fix for the verification-run regressions (see DECISIONS.md
 [2026-08-24]):
 
 - **`rag/keyword_index.py`** — in-house Okapi BM25 over the same Chroma
-  collection (no new dependency); lazy rebuild per process so it can never
-  drift from the vector store. Tokenizer folds plural/-ing/-ed/final-e
-  suffixes identically on queries and corpus.
+  collection (no new dependency); lazy snapshot once per process. The old
+  "can never drift" claim is corrected as of 2026-09-17: subsequent index
+  mutations do not refresh that snapshot (`rag/keyword_index.py:209`).
+  Tokenizer folds plural/-ing/-ed/final-e suffixes identically on queries
+  and corpus.
 - **`rag/retriever.py`** — Reciprocal Rank Fusion of both candidate lists
   (keyword weight 1.5), then best-chunk-per-document dedupe with one
   exception: a page's second chunk joins top-k when its BM25 is >=0.9 of the
@@ -182,7 +384,14 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
   contributing two chunks can produce two near-identical-looking source
   entries (cosmetic).
 
-## What's built and verified
+## Historical Phase 1 implementation and verification (2026-08-24)
+
+2026-09-17 context: the inventory below describes that acceptance run, not
+current service health, corpus counts or UI delivery. Later phases and UI
+sessions supersede this minimal sidebar. Version-subtree exclusion does not
+prove exact installed-v16 compatibility; citation/identifier repair does not
+prove semantic grounding. Localhost binding is an operating requirement,
+not authentication or a source-established measurement of today's bind.
 
 - **Doc source resolved** — spec's git-repo option no longer exists; corpus
   crawled from docs.frappe.io `{url}.md` markdown alternates (BLOCKERS.md
@@ -231,32 +440,39 @@ Full live sweep through POST /ask (`data/sweep_2026-08-24_hybrid_v2.json`):
 - [x] README clean-machine setup
 - [x] progress/CURRENT.md accurate
 
-## What's known to not work / not started yet
+## Remaining observations and next gate (2026-09-17)
 
-- Frappe sidebar untested against a real bench (no ERPNext install here).
-- RAGAS not re-scored after the hybrid change — expect context_precision to
-  move; current table describes the pre-change baseline.
-- Q15/Q2 minor content imperfections noted above (grounded, just not
-  maximally focused).
-- Versioned doc subtrees remain excluded for Phase 1 (DECISIONS.md); the
-  purge means the live index finally matches that decision exactly.
-- Not started (later phases): ERPNext live-API tool, orchestrator,
-  employee mode.
+- Documentation reconciliation is COMPLETE as a documentary unit (2026-09-17):
+  independent read-only content review (architecture + fresh review after a
+  prior reviewer's /tmp write disclosure) and security review found no
+  blocking documentation findings; strict OpenSpec change validation and
+  `git diff --check` pass. This is documentary acceptance only — it passes
+  no runtime gate. The change is NOT archived and NOT committed; ADRs, task
+  checkboxes and this file were updated by the parent after the review pass.
+- Full live NLU acceptance, real Bench installation/assets/Desk behavior and
+  Docker parity remain outstanding. Historical lack of Bench on this box
+  is not a new environment measurement or absence of the staging API.
+- The post-hybrid RAGAS recovery is recorded, not pending a first score.
+  Independent judging and per-question review, including Q3/Q7/Q11 lows
+  and Q2/Q15 content imperfections, remain quality-evidence gaps. A stronger
+  judge alone would not establish causality or production acceptance.
+- Earlier "not started" references to ERPNext reads, orchestration and
+  employee mode were obsolete: Phases 5–7 implemented them and were
+  historically accepted 2026-08-24, with the HLD's authorization limits.
+- Versioned-subtree exclusion and the dated v13 purge do not establish a
+  present corpus inventory or exact v16 compatibility. Public rebuilds can
+  remove unrelated corpora; lexical snapshots and current-code chunks can
+  become stale (ARCHITECTURE.md, "Known index lifecycle gaps"). No reindex
+  or runtime remediation is authorized by this work.
+- Production writes remain unapproved under SECURITY.md; staging gating and
+  individual confirmation remain mandatory. No live flag/configuration was
+  inspected. Future implementation requires separately approved changes and
+  decisions in DECISIONS.md, not historical phase completion.
+- Historical housekeeping: Phase 8 reported two labeled staging test
+  Customers. Their current existence is unmeasured; no deletion or other
+  data action is part of this change. The product has no delete operation.
 
-## Next step
-
-**ROADMAP COMPLETE — all eight phases functionally done.** Remaining,
-deliberately outside the build loop:
-- Production writes stay OFF until you explicitly approve pointing
-  ERPNEXT_BASE_URL at a production system and log that decision in
-  DECISIONS.md (ERPNEXT_WRITE_ENABLED currently gates this).
-- Real-bench verification of the Frappe sidebar incl. diff/approve UI
-  (no bench exists here).
-- Optional: RAGAS re-score post-hybrid-retrieval (samples ready at
-  data/ragas_samples_2026-08-24T11:32:30Z.json).
-- Housekeeping: the two clearly-labeled test Customers created during
-  Phase 8 verification can be deleted from the UI (our tool has no
-  delete, by design).
+See progress/BLOCKERS.md for pending review and future decision gates.
 
 ## Phase 8 — Write-capable ERPNext Agent: what changed
 
@@ -336,9 +552,11 @@ deliberately outside the build loop:
 
 - **`orchestrator.py`** — routes each question: `erpnext` (live-instance
   data), `code` (this repo's source/errors), `rag` (default, general
-  knowledge). Deterministic hint overrides first; one LLM classifier call
-  breaks ties; ANY failure defaults to rag — routing can be wrong, never
-  fatal.
+  knowledge). This records the 2026-08-24 three-way task router, not the
+  later full conversational flow. Correction dated 2026-09-17: task-router
+  classifier failure defaults to RAG (`orchestrator.py:498`); failed NLU
+  uses strong task heuristics or clarification (`orchestrator.py:769`).
+  "ANY failure defaults to rag" was not a universal fallback guarantee.
 - **Version-awareness (PROJECT.md non-negotiable)** — the connected
   instance's Frappe/ERPNext versions are fetched read-only
   (`frappe.utils.change_log.get_versions`, cached TTL 600s) and injected

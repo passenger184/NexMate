@@ -53,6 +53,24 @@ corpus inventory. Original requirements remain in the historical phase specs.
   UI references are not evidence of Bench delivery. Resolution memory is
   a corpus distinct from conversation state (`docs/PHASE_4_SPEC.md`).
 
+## Immediate bounded sequence — 2026-09-17 planning update
+
+The user approved implementing `authenticated-frappe-control-plane` after
+its plans are internally consistent and strictly validated; this update is
+planning only, not implementation or complete M2/G2 acceptance. Its scope
+is authenticated chat-only transport with deterministic backend tool denial,
+not owned sessions, ACL retrieval or production readiness. DECISIONS.md's
+appended clarification records the four resolved choices and approval.
+
+Immediately after that bounded boundary is verified, the next milestone is
+the separately approved `frappe-owned-conversation-state` change: persistent
+Frappe-owned records, authenticated user ownership, site association,
+replacement of caller-controlled ownership and the JSON store, and a
+migration/compatibility strategy. Legacy `session_id` forwarding is only a
+temporary continuity bridge until then, never auth, ownership or isolation.
+This sequence neither implements nor approves the successor, passes M2/M3,
+nor changes the wider gates below.
+
 ## Ordered future migration milestones — not authorized implementation
 
 The stages below express dependencies, not a new active numbered phase or

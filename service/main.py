@@ -17,9 +17,12 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 import logging
 
 logger = logging.getLogger("nexmate")
@@ -36,6 +39,7 @@ logger.setLevel(logging.INFO)
 import config
 from rag import generator, retriever
 from service import session_store
+from service.auth import ServiceAuthMiddleware, validate_gateway_envelope
 from tools import edit as edit_tool
 from tools import erpnext as erpnext_tool
 from tools import erpnext_write as erpnext_write_tool
@@ -196,12 +200,18 @@ class ErpnextListRequest(BaseModel):
 
 
 class OrchestrateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user: Any = None
+    site: Any = None
+    execution_scope: Any = None
+
     # Same transport-validity contract as AskRequest: non-blank and
     # bounded. Conversational validity is the router's job, not the
     # schema's.
     question: str = Field(min_length=1, max_length=2000)
     session_id: str | None = Field(
-        None, pattern=r"[A-Za-z0-9_-]{1,64}")
+        None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     mode: Literal["developer", "employee"] = "developer"
 
     @field_validator("question")
@@ -297,6 +307,14 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+app.add_middleware(ServiceAuthMiddleware)
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_orchestrate_validation(request: Request, exc: RequestValidationError):
+    if request.url.path == "/orchestrate":
+        return JSONResponse({"detail": "invalid_orchestrate_request"}, status_code=422)
+    return await request_validation_exception_handler(request, exc)
 
 
 def _dedupe_sources(chunks: list[dict[str, Any]]) -> list[Source]:
@@ -544,13 +562,14 @@ def tools_erpnext_list(req: ErpnextListRequest) -> dict:
 
 
 @app.post("/orchestrate", response_model=OrchestrateResponse)
-def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
+def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateResponse:
     """Phase 6: single entry point routing between RAG, code agent, and
     the live ERPNext tool; injects live instance versions into prompts.
 
     Sessions behave like /ask (condense-then-retrieve on follow-ups);
     routing happens on the CONDENSED question when a session is active.
     """
+    chat_only = validate_gateway_envelope(req.model_dump(), req.model_fields_set, request)
     import json as _json
     request_id = uuid.uuid4().hex[:12]
     t0 = time.perf_counter()
@@ -570,7 +589,7 @@ def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
             search_question = candidate
 
     result = orchestrator.handle_question(
-        search_question, req.session_id, history, mode=req.mode)
+        search_question, req.session_id, history, mode=req.mode, chat_only=chat_only)
 
     turn_count: int | None = None
     if req.session_id:
@@ -634,7 +653,8 @@ def orchestrate(req: OrchestrateRequest) -> OrchestrateResponse:
         route=result["route"],
         route_how=result["route_how"],
         mode=req.mode,
-        version_info=orchestrator.get_instance_versions(),
+        version_info=(orchestrator.unavailable_versions() if chat_only
+                      else orchestrator.get_instance_versions()),
         session_id=req.session_id,
         turn_count=turn_count,
         condensed_question=condensed,

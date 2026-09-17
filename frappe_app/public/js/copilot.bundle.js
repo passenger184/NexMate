@@ -23,6 +23,9 @@
   "use strict";
 
   // ---------- environment ----------
+  var isPreview = !!(window.location && window.location.pathname === "/ui/preview.html");
+  var deskUnavailable = "This action is unavailable in Desk. Chat is available.";
+
   function apiBase() {
     if (window.COPILOT_API_BASE) return String(window.COPILOT_API_BASE);
     try {
@@ -36,6 +39,7 @@
   // ---------- state ----------
   var S = {
     sessionId: null,
+    conversationToken: 0,
     mode: "developer",
     busy: false,
     els: {},
@@ -55,6 +59,9 @@
     } catch (e) { /* ignore */ }
   }
   function newSession(rerender) {
+    S.conversationToken++;
+    S.busy = false;
+    if (S.els.sendBtn) S.els.sendBtn.disabled = false;
     S.sessionId =
       "s-" + Date.now().toString(36) + "-" +
       Math.random().toString(36).slice(2, 8);
@@ -335,6 +342,7 @@
   }
 
   function post(path, body) {
+    if (!isPreview) return Promise.reject(serverError(403, { detail: deskUnavailable }));
     return fetch(apiBase() + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -349,12 +357,44 @@
     });
   }
 
-  function askOrchestrate(question) {
-    var m = addAssistantShell();
-    return post("/orchestrate", {
-      question: question, session_id: S.sessionId, mode: S.mode,
+  function chatRequest(question) {
+    if (isPreview) {
+      return post("/orchestrate", {
+        question: question, session_id: S.sessionId, mode: S.mode,
+      });
+    }
+    var headers = { "Content-Type": "application/json" };
+    if (typeof frappe !== "undefined" && frappe.csrf_token)
+      headers["X-Frappe-CSRF-Token"] = frappe.csrf_token;
+    return fetch("/api/method/erpnext_ai_copilot.api.ask", {
+      method: "POST",
+      credentials: "same-origin",
+      redirect: "error",
+      headers: headers,
+      body: JSON.stringify({ question: question, session_id: S.sessionId }),
     }).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (j) {
+        if (!r.ok || !j || !j.message || typeof j.message.answer !== "string")
+          throw serverError(r.status, { detail: "NexMate assistant is unavailable. Please try again later." });
+        return j.message;
+      });
+    }).catch(function (err) {
+      if (err && err.isServerError) throw err;
+      throw new Error("NexMate assistant is unavailable. Please try again later.");
+    });
+  }
+
+  function askOrchestrate(question) {
+    var conversationToken = S.conversationToken;
+    var m = addAssistantShell();
+    return chatRequest(question).then(function (r) {
+      if (conversationToken !== S.conversationToken) return;
       if (r.session_id) S.sessionId = r.session_id;
+      if (!isPreview && (r.mode === "employee" || r.mode === "developer")) {
+        S.mode = r.mode;
+        S.els.mode.value = S.mode;
+      }
+      persist();
       fillAssistant(m, md(r.answer), {
         confidence: r.confidence,
         route: r.route,
@@ -368,6 +408,7 @@
   // ---------- slash commands ----------
   function handleCommand(text) {
     var m = addAssistantShell();
+    if (!isPreview) return fillAssistant(m, deskUnavailable);
     var sp = text.indexOf(" ");
     var cmd = (sp === -1 ? text : text.slice(0, sp)).toLowerCase();
     var rest = sp === -1 ? "" : text.slice(sp + 1).trim();
@@ -441,6 +482,10 @@
 
   // ---------- approval cards ----------
   function approveBar(card, applySpec, onApplied) {
+    if (!isPreview) {
+      card.appendChild(el("div", "cp-error-inline", deskUnavailable));
+      return;
+    }
     var bar = el("div", "cp-approvebar");
     var ok = el("button", "cp-btn cp-btn-primary", "Approve");
     var no = el("button", "cp-btn", "Reject");
@@ -524,11 +569,12 @@
     // Transport validity only: non-empty input always goes through.
     // Short messages ("hi", "ok", "why") are conversationally valid —
     // the router, not a character count, decides what they mean.
-    if (q.startsWith("/") && q.trim().split(/\s+/).length === 1 &&
+    if (isPreview && q.startsWith("/") && q.trim().split(/\s+/).length === 1 &&
         ["/read", "/search", "/explain"].indexOf(q.toLowerCase()) !== -1) {
       systemNote(q + " needs an argument, e.g. " + q + " <something>");
       return;
     }
+    var conversationToken = S.conversationToken;
     S.busy = true;
     S.els.sendBtn.disabled = true;
     addUser(q);
@@ -537,11 +583,13 @@
     var run = q.startsWith("/")
       ? handleCommand(q) : askOrchestrate(q);
     Promise.resolve(run).catch(function (err) {
+      if (conversationToken !== S.conversationToken) return;
       appendError(String((err && err.message) || err), {
         kind: errorKind(err),
         status: err && err.status,
       });
     }).finally(function () {
+      if (conversationToken !== S.conversationToken) return;
       S.busy = false;
       S.els.sendBtn.disabled = false;
       S.els.input.focus();
@@ -579,12 +627,12 @@
   function emptyState() {
     var box = el("div", "cp-empty");
     box.appendChild(el("div", "cp-empty-title", "Ask anything ERPNext"));
-    var sugg = [
+    var sugg = isPreview ? [
       "How do I create a Sales Invoice?",
       "What fields does Customer have?",
       "How does hybrid retrieval fuse results?",
       "/explain KeyError when parsing read_file responses",
-    ];
+    ] : ["How do I create a Sales Invoice?", "What is a DocType?"];
     sugg.forEach(function (s) {
       var chip = el("button", "cp-suggestion", esc(s));
       chip.addEventListener("click", function () {
@@ -594,7 +642,7 @@
       box.appendChild(chip);
     });
     box.appendChild(el("div", "cp-empty-hint",
-      "Tools: /read /search /explain /edit /newdoc /editdoc"));
+      isPreview ? "Tools: /read /search /explain /edit /newdoc /editdoc" : "Chat only. Live tools are unavailable in Desk."));
     S.els.messages.appendChild(box);
   }
 
@@ -633,7 +681,12 @@
       panel: wrap.querySelector("#cp-panel"),
       mode: wrap.querySelector("#cp-mode"),
     };
-    S.els.mode.value = S.mode;
+    S.els.mode.value = isPreview ? S.mode : "";
+    if (!isPreview) {
+      S.els.mode.disabled = true;
+      S.els.mode.title = "Mode is assigned by your Frappe roles.";
+      S.els.input.placeholder = "Ask about ERPNext…";
+    }
 
     wrap.querySelector("#cp-toggle").addEventListener("click", togglePanel);
     wrap.querySelector("#cp-close").addEventListener("click", togglePanel);
@@ -643,13 +696,14 @@
     });
     S.els.input.addEventListener("input", autoGrow);
     S.els.mode.addEventListener("change", function () {
+      if (!isPreview) return;
       S.mode = S.els.mode.value; persist();
       systemNote("Switched to " + S.mode + " mode.");
     });
     wrap.querySelector("#cp-fresh").addEventListener("click", function () {
-      var sid = S.sessionId;
-      post("/tools/session/reset", { session_id: sid })
-        .catch(function () { /* offline: still clear locally */ })
+      if (!isPreview) { newSession(); return; }
+      post("/tools/session/reset", { session_id: S.sessionId })
+        .catch(function () {})
         .finally(function () { newSession(); });
     });
 

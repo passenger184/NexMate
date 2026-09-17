@@ -36,6 +36,18 @@ import capabilities
 
 NO_ANSWER = "I don't have a confident answer for this in the knowledge base."
 
+CHAT_ONLY_CAPABILITIES = (
+    "I can discuss ERPNext/Frappe and answer questions from the indexed "
+    "knowledge base with citations when available. Live data lookups, file "
+    "tools, edits, approvals and server session reset are unavailable in Desk chat."
+)
+
+CHAT_ONLY_UNAVAILABLE = (
+    "That operation is unavailable in Desk chat. I can answer questions "
+    "from indexed ERPNext/Frappe documentation, but cannot access live "
+    "records, search files, make edits or execute approvals."
+)
+
 EMPLOYEE_OUT_OF_SCOPE = (
     "That question needs developer access to this project's source code, "
     "which isn't available in employee mode. Please ask your "
@@ -302,7 +314,7 @@ _CONVERSATIONAL_FALLBACKS = {
 
 
 def _respond_conversational(subtype: str | None, question: str,
-                            allow_llm: bool = True) -> str:
+                            allow_llm: bool = True, chat_only: bool = False) -> str:
     """Short natural reply; deterministic fallback if generation fails.
 
     Capability facts never come from here — capability answers render
@@ -310,6 +322,8 @@ def _respond_conversational(subtype: str | None, question: str,
     """
     fallback = _CONVERSATIONAL_FALLBACKS.get(
         subtype, _CONVERSATIONAL_FALLBACKS[None])
+    if chat_only and fallback == _SMALLTALK_REPLY:
+        fallback = "Hello! " + CHAT_ONLY_CAPABILITIES
     if not allow_llm:
         return fallback
     try:
@@ -324,9 +338,10 @@ def _respond_conversational(subtype: str | None, question: str,
 
 
 def _conversational_result(subtype: str | None, question: str, how: str,
-                           allow_llm: bool = True) -> dict[str, Any]:
+                           allow_llm: bool = True,
+                           chat_only: bool = False) -> dict[str, Any]:
     return {
-        "answer": _respond_conversational(subtype, question, allow_llm),
+        "answer": _respond_conversational(subtype, question, allow_llm, chat_only),
         "sources": [],
         "confidence": "high",
         "route": "smalltalk",
@@ -335,9 +350,11 @@ def _conversational_result(subtype: str | None, question: str, how: str,
     }
 
 
-def _capability_result(mode: str, how: str) -> dict[str, Any]:
+def _capability_result(mode: str, how: str,
+                       chat_only: bool = False) -> dict[str, Any]:
     return {
-        "answer": capabilities.render_capability_answer(mode),
+        "answer": (CHAT_ONLY_CAPABILITIES if chat_only
+                   else capabilities.render_capability_answer(mode)),
         "sources": [],
         "confidence": "high",
         "route": "capability",
@@ -346,9 +363,14 @@ def _capability_result(mode: str, how: str) -> dict[str, Any]:
     }
 
 
-def _clarify_result(topic: str | None, how: str) -> dict[str, Any]:
+def _clarify_result(topic: str | None, how: str,
+                    chat_only: bool = False) -> dict[str, Any]:
     return {
-        "answer": capabilities.render_clarification(topic),
+        "answer": (
+            "Which ERPNext/Frappe concept or how-to would you like explained "
+            "from indexed documentation? Please describe the workflow or screen."
+            if chat_only else capabilities.render_clarification(topic)
+        ),
         "sources": [],
         "confidence": "low",
         "route": "clarify",
@@ -357,9 +379,14 @@ def _clarify_result(topic: str | None, how: str) -> dict[str, Any]:
     }
 
 
-def _scope_result(how: str) -> dict[str, Any]:
+def _scope_result(how: str, chat_only: bool = False) -> dict[str, Any]:
     return {
-        "answer": capabilities.render_out_of_scope(),
+        "answer": (
+            "That's outside Desk chat's scope. I can answer ERPNext/Frappe "
+            "how-to and concept questions from indexed documentation. "
+            "Try asking how to create a Sales Invoice."
+            if chat_only else capabilities.render_out_of_scope()
+        ),
         "sources": [],
         "confidence": "low",
         "route": "out_of_scope",
@@ -376,9 +403,15 @@ _TROUBLESHOOT_CLARIFY = (
 )
 
 
-def _troubleshoot_clarify_result(how: str) -> dict[str, Any]:
+def _troubleshoot_clarify_result(how: str,
+                                 chat_only: bool = False) -> dict[str, Any]:
     return {
-        "answer": _TROUBLESHOOT_CLARIFY,
+        "answer": (
+            "Which ERPNext/Frappe workflow or screen is giving you trouble, "
+            "and what did you expect to happen? I can explain relevant "
+            "guidance from indexed documentation."
+            if chat_only else _TROUBLESHOOT_CLARIFY
+        ),
         "sources": [],
         "confidence": "low",
         "route": "clarify",
@@ -414,6 +447,10 @@ def get_instance_versions(force: bool = False) -> dict[str, str]:
     _versions_cache["fetched_at"] = time.time()
     _versions_cache["data"] = data
     return data
+
+
+def unavailable_versions() -> dict[str, str]:
+    return {"frappe": "unknown", "erpnext": "unknown", "status": "unavailable"}
 
 
 def version_preamble() -> str:
@@ -710,6 +747,8 @@ def handle_question(
     session_id: str | None = None,
     history: list[dict[str, str]] | None = None,
     mode: str = "developer",
+    *,
+    chat_only: bool = False,
 ) -> dict[str, Any]:
     """Route + execute + generate. Mirrors /ask's safety semantics.
 
@@ -729,7 +768,7 @@ def handle_question(
     the user.
     """
     tag: dict[str, Any] = {}
-    out = _handle_question_inner(question, session_id, history, mode, tag)
+    out = _handle_question_inner(question, session_id, history, mode, tag, chat_only)
     out = dict(out)
     out.setdefault("nlu_kind", tag.get("nlu_kind"))
     out.setdefault("nlu_confidence", tag.get("nlu_confidence"))
@@ -744,6 +783,7 @@ def _handle_question_inner(
     history: list[dict[str, str]] | None,
     mode: str,
     tag: dict[str, Any],
+    chat_only: bool = False,
 ) -> dict[str, Any]:
     """Body of handle_question; records its NLU verdict into tag.
 
@@ -758,10 +798,10 @@ def _handle_question_inner(
         tag.update(nlu_kind=f"exact:{exact}", nlu_confidence=1.0,
                    nlu_topic=None)
     if exact == "capability":
-        return _capability_result(mode, "heuristic")
+        return _capability_result(mode, "heuristic", chat_only)
     if exact is not None:
         return _conversational_result(exact, question, "heuristic",
-                                      allow_llm=False)
+                                      allow_llm=False, chat_only=chat_only)
     if mode not in ("developer", "employee"):
         return {"answer": f"Unknown mode {mode!r}.", "sources": [],
                 "confidence": "low", "route": "smalltalk",
@@ -776,7 +816,7 @@ def _handle_question_inner(
         # safely instead of executing a possibly-wrong tool path.
         degraded = _heuristic_route(question)
         if degraded is None:
-            return _clarify_result(None, "degraded")
+            return _clarify_result(None, "degraded", chat_only)
         route, how = degraded, "degraded"
     else:
         tag.update(nlu_kind=nlu["kind"],
@@ -785,13 +825,13 @@ def _handle_question_inner(
         kind = nlu["kind"]
         if kind == "conversational":
             return _conversational_result(
-                nlu.get("subtype"), question, "classifier")
+                nlu.get("subtype"), question, "classifier", chat_only=chat_only)
         if kind == "capability":
-            return _capability_result(mode, "classifier")
+            return _capability_result(mode, "classifier", chat_only)
         if kind == "clarify":
-            return _clarify_result(nlu.get("topic"), "classifier")
+            return _clarify_result(nlu.get("topic"), "classifier", chat_only)
         if kind == "out_of_scope":
-            return _scope_result("classifier")
+            return _scope_result("classifier", chat_only)
         if kind == "troubleshoot":
             # Troubleshooting reuses existing capabilities only: error
             # text goes down the code-explain path, anything vaguer gets
@@ -799,10 +839,10 @@ def _handle_question_inner(
             if explain.looks_like_error(question):
                 route, how = "code", "classifier"
             else:
-                return _troubleshoot_clarify_result("classifier")
+                return _troubleshoot_clarify_result("classifier", chat_only)
         else:  # task
             if nlu.get("confidence", 0.0) < config.NLU_MIN_CONFIDENCE:
-                return _clarify_result(nlu.get("topic"), "classifier")
+                return _clarify_result(nlu.get("topic"), "classifier", chat_only)
             if (history and nlu.get("context_dependency") == "follows_topic"
                     and nlu.get("topic")):
                 # Elliptical continuation ("what about Purchase
@@ -818,6 +858,15 @@ def _handle_question_inner(
                     question = condensed
                     tag["refined_question"] = condensed
             route, how = decide_route(question, history)
+
+    if chat_only and route in ("code", "erpnext"):
+        return {
+            "answer": CHAT_ONLY_UNAVAILABLE,
+            "sources": [],
+            "confidence": "low",
+            "route": route,
+            "route_how": how + "+chat-only-denied",
+        }
 
     if route == "code":
         if mode == "employee":
@@ -912,7 +961,7 @@ def _handle_question_inner(
     history = history or []
     answer = generator.generate_answer(
         question, chunks, history,
-        extra_system=version_preamble(), persona=mode)
+        extra_system="" if chat_only else version_preamble(), persona=mode)
     return {
         "answer": answer,
         "sources": [

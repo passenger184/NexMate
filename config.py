@@ -13,6 +13,11 @@ from dotenv import load_dotenv
 # provider configuration.
 load_dotenv()
 
+NEXMATE_SERVICE_KEY = os.environ.get("NEXMATE_SERVICE_KEY")
+NEXMATE_ENV = os.environ.get("NEXMATE_ENV", "production")
+NEXMATE_DEV_UNAUTHENTICATED = os.environ.get("NEXMATE_DEV_UNAUTHENTICATED", "0")
+NEXMATE_FRAPPE_SITE = os.environ.get("NEXMATE_FRAPPE_SITE")
+
 # --- Paths ---------------------------------------------------------------
 ROOT_DIR = Path(__file__).resolve().parent
 DATA_DIR = ROOT_DIR / "data"

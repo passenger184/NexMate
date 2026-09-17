@@ -2,10 +2,13 @@
 
 A tool-using AI assistant for Frappe v16 / ERPNext v16, with a Desk sidebar
 implementation and standalone browser preview. The current single-project
-system includes cited public/company retrieval, code tools, conversation
-history, live ERPNext reads, developer/employee personas, and confirmed
-staging create/update actions. Historical Phases 1–8 acceptance is not
-production readiness; real Bench/Desk integration remains unverified.
+system includes cited public/company retrieval and legacy code/ERPNext tools.
+The implemented `authenticated-frappe-control-plane` boundary makes Desk
+chat-only through authenticated Frappe; legacy tools remain separate behind
+the inference authentication gate. Conversations still use transitional
+caller-selected JSON sessions, not authenticated ownership. Historical
+Phases 1–8 acceptance is not production readiness; final boundary reviews
+and real Bench/Desk integration remain pending.
 
 See `PROJECT.md` (product definition), `ARCHITECTURE.md` (the sole canonical
 HLD, current versus approved target), `ROADMAP.md` (historical acceptance
@@ -83,16 +86,56 @@ company/resolution chunks added later. Treat this as a destructive rebuild,
 not an incremental refresh; preserve and re-ingest the other corpora as
 needed. See `ARCHITECTURE.md` for index freshness and rebuild limitations.
 
+## Configure the authenticated boundary
+
+Inference defaults to `NEXMATE_ENV=production` and
+`NEXMATE_DEV_UNAUTHENTICATED=0`. Set `NEXMATE_SERVICE_KEY` to a
+cryptographically random 32-byte secret represented as exactly 64 hexadecimal
+characters. Blank, malformed and repetitive keys are rejected; shape checks
+cannot prove randomness. Provision the identical value only in Frappe's
+server-side `site_config.json` as `nexmate_service_key`. Never put it in
+browser headers/storage, boot data, source control or diagnostic output.
+See `DEVELOPMENT.md` for provisioning, rotation and fail-closed rollback.
+
+Set `NEXMATE_FRAPPE_SITE` to exactly the authoritative `frappe.local.site`
+identifier, not a guessed public hostname. Frappe also requires a trusted
+server-configured `copilot_api_base`; the gateway appends `/orchestrate`.
+`nexmate_developer_roles` defaults to `[]`: no implicit Administrator or
+System Manager elevation. An explicit matching role selects developer
+persona, not tool access or corpus permission. Optional
+`nexmate_inference_timeout` is a finite JSON number in `(0, 900]` seconds,
+default `300`; it is an HTTP read timeout, not total request duration,
+cancellation or retry policy.
+
+The example environment file contains a blank `NEXMATE_SERVICE_KEY=` line.
+Replace it with a valid secret for authenticated operation. For the separate
+unauthenticated local development workflow, remove that line entirely and
+unset any inherited value, or configure a valid key. Blank is invalid, not
+unset. Both exact development settings below are still required.
+
 ## Run the service
 
 ```bash
 uvicorn service.main:app --host 127.0.0.1 --port 8000
 ```
 
-Binds localhost only. Test it:
+Bind to localhost unless separately authorized private-network access is
+required. Exact `/health` is public and returns only `{"status":"ok"}` even
+with missing/invalid authentication configuration. It is minimal liveness,
+not readiness of authentication, the index, providers or ERPNext:
 
 ```bash
 curl -s http://127.0.0.1:8000/health
+```
+
+All other paths, including direct APIs, assets, API docs, unknown paths and
+OPTIONS, pass the credential gate. Trusted server callers supply
+`X-NexMate-Key`; do not distribute that credential to browsers. The direct
+curl examples below omit credentials and work only under the explicit local
+development settings in the preview section. They are legacy operations,
+not Desk requests or permission grants:
+
+```bash
 curl -s http://127.0.0.1:8000/ask \
   -H 'Content-Type: application/json' \
   -d '{"question": "How do I create a custom DocType?"}' | python3 -m json.tool
@@ -111,7 +154,7 @@ Response contract:
 `no_match` means retrieval found nothing relevant: the answer is a fixed
 honest refusal and `sources` is empty — the UI renders this distinctly.
 
-### Code tools (Phase 2)
+### Legacy code tools (not available in Desk)
 
 ```bash
 curl -s http://127.0.0.1:8000/tools/read_file \
@@ -119,8 +162,8 @@ curl -s http://127.0.0.1:8000/tools/read_file \
   -d '{"path": "tools/pathsafe.py"}'
 ```
 
-Tier-1 read tool: always-on, no confirmation. Every path is resolved
-(symlinks included) against `PROJECT_ROOT` (`config.py`, overridable via
+Tier-1 read tool: no per-read confirmation after the service gate. Every path
+is resolved (symlinks included) against `PROJECT_ROOT` (`config.py`, overridable via
 `.env`) and anything resolving outside it is rejected with HTTP 400 and an
 explanation — traversal, absolute escapes, and symlinked escapes all fail
 loudly. Oversized reads (> `MAX_READ_FILE_BYTES`, default 1MB) are refused,
@@ -147,7 +190,7 @@ weighted matches, feeds excerpts to the generation model under the same
 grounded-only rules as `/ask`, and cites `path` + line ranges; it declines
 honestly when no matching code exists.
 
-### Orchestrator (Phases 6–7)
+### Legacy direct orchestrator (not the Desk gateway)
 
 ```bash
 curl -s http://127.0.0.1:8000/orchestrate \
@@ -157,24 +200,36 @@ curl -s http://127.0.0.1:8000/orchestrate \
 
 Conversational entry point with seven response routes: `rag`, `code`,
 `erpnext`, `smalltalk`, `capability`, `clarify`, and `out_of_scope`
-(`service/main.py:224`). Exact fast paths and NLU precede the three-way
+(`service/main.py:234`). Exact fast paths and NLU precede the three-way
 task router; direct tool endpoints also remain available. Responses carry
 `route`, `route_how`, and `version_info` (which can report unavailable).
 `mode: "employee"` selects a public-docs persona and orchestration guards
 against code/schema routes; it is caller-supplied, not authenticated
 permission enforcement. Sessions use `session_id`, as on `/ask`.
-See `ARCHITECTURE.md` for current boundaries and the Frappe-authorized target.
+A gateway envelope is different: authenticated service credentials plus
+validated user/site/mode and exact `execution_scope="chat-only"` are required
+before history or routing. Partial/invalid envelopes and site mismatch
+refuse without legacy downgrade, even in development. Backend dispatch
+blocks code and ERPNext handlers in both personas, including follow-ups and
+degraded routing, and suppresses incidental live version calls. Existing
+cached RAG remains available; this is not ACL-aware retrieval.
 
-## Test the UI right now (no bench needed)
+## Standalone preview (explicit local development only)
 
-The sidebar is served by the FastAPI service itself as a standalone page
-that talks to the same API:
+The preview talks directly to the legacy inference API, unlike Desk. After
+removing a blank key assignment as described above, enable BOTH settings:
 
 ```bash
-uvicorn service.main:app --host 127.0.0.1 --port 8000
-# open in a browser:
-xdg-open http://127.0.0.1:8000/ui/preview.html   # or just type the URL
+NEXMATE_ENV=development NEXMATE_DEV_UNAUTHENTICATED=1 \
+  uvicorn service.main:app --host 127.0.0.1 --port 8000
+xdg-open http://127.0.0.1:8000/ui/preview.html
 ```
+
+The browser receives no service key. Only missing-header requests with a
+valid or unset configured key qualify; invalid supplied credentials or
+invalid configured keys still refuse. One switch, localhost, request origin
+or browser preview detection cannot enable the backend exemption. Never
+use this development bypass to recover production access.
 
 Click the **AI** button (bottom-right). What you can do:
 
@@ -189,10 +244,13 @@ Click the **AI** button (bottom-right). What you can do:
 | `/newdoc Customer {"customer_name": "...", "customer_type": "Individual", "customer_group": "Commercial"} :: reason` | shows an **ERPNext write card** — Approve creates the document live (staging!) |
 | `/editdoc Customer <name> {"customer_name": "new"} :: reason` | same flow for updates |
 
-The header switch selects **developer** or **employee** orchestration
-behavior, not user privileges. Start fresh resets the session. The browser
-retains a session ID and the service retains JSON history, but the visible
-transcript is not restored after reload. The preview is not Bench proof.
+In the preview only, the header switch selects **developer** or **employee**
+legacy behavior, not privileges. Preview start-fresh requests server session
+reset, then clears locally even if that request fails. The browser retains
+a session ID and the service retains JSON history, but the visible
+transcript is not restored after reload. Preview tools retain their existing
+confirmation/staging safeguards; preview access is not permission to write.
+The preview is not Bench proof.
 
 ## Desk sidebar setup outline (unverified)
 
@@ -210,22 +268,38 @@ cd $BENCH/apps/erpnext_ai_copilot && pip install -e .
 bench build --app erpnext_ai_copilot
 bench --site yoursite.local install-app erpnext_ai_copilot
 
-# point the sidebar at the FastAPI service (default http://localhost:8000):
 bench --site yoursite.local set-config copilot_api_base "http://<service-host>:8000"
 bench --site yoursite.local clear-cache
 ```
 
-Intended Desk behavior is a floating **AI** button opening the NexMate
-panel; installation, built assets and real Desk behavior still need proof.
-The service address reaches the browser through
-`frappe.boot.copilot_settings` (`frappe_app/erpnext_ai_copilot/boot.py:10`),
-and the browser calls FastAPI directly; `localhost` means the browser's
-machine, not necessarily the Bench host.
+Provision the remaining server settings in the authenticated-boundary
+section before using chat. The destination is resolved from the Frappe
+server, so localhost there means the Bench host. Use protected private
+transport; a shared header alone does not encrypt the connection.
 
-> HTTPS pages block plain-HTTP API calls. TLS or a same-origin proxy alone
-> does not establish production authorization. The approved target is
-> browser-to-authenticated-Frappe only, with private separate inference;
-> that migration is not implemented by these setup steps.
+The implemented Desk bundle sends chat only to
+`/api/method/erpnext_ai_copilot.api.ask`, with same-origin session credentials
+and Frappe's CSRF token. The non-guest gateway constructs the envelope;
+API/transport failures are sanitized and never trigger direct inference
+fallback. The mode selector is disabled. File/business tools, slash commands,
+proposals and approval/rejection actions are unavailable, including stale
+cards. Desk start-fresh clears the local transcript and replaces the local
+session ID only: old JSON history is not deleted. Pending old responses
+cannot restore the cleared UI; this does not cancel server work.
+
+Boot still exposes the legacy address, but no credential; Desk no longer
+uses that address (`frappe_app/erpnext_ai_copilot/boot.py:10`,
+`frappe_app/public/js/copilot.bundle.js:360`). Source and stub-DOM checks do
+not establish real Frappe authentication/CSRF integration, packaging or Desk
+installation. No full G2/M2 or production-readiness claim is made.
+
+Immediately after this bounded boundary is verified, the next milestone
+requires the separately approved `frappe-owned-conversation-state` change:
+Frappe-owned persistent records, authenticated user ownership, site
+association, replacement of caller-controlled ownership and JSON storage,
+and migration/compatibility. It is not implemented here. Fixed site binding
+and role-derived persona do not establish session ownership, corpus ACLs or
+private-data cloud consent.
 
 Same-source Bench/Docker installation and update parity, compatibility,
 patches/migrate, release and rollback checks are **future gates**, not

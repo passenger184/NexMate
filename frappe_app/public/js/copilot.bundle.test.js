@@ -5,6 +5,7 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const vm = require("node:vm");
 const BUNDLE = path.join(__dirname, "copilot.bundle.js");
 const CSS = path.join(__dirname, "..", "css", "copilot.css");
 
@@ -138,43 +139,202 @@ function walk(node, sel, acc) {
   }
   return acc;
 }
-const byId = {};
-const documentStub = {
-  readyState: "complete",
-  body: makeEl("body", {}),
-  createElement(t) { return makeEl(t.toLowerCase(), {}); },
-  createTextNode(t) { return { nodeType: 3, text: String(t), parent: null }; },
-  querySelector(s) { return walk(this.body, s, [])[0] || null; },
-  querySelectorAll(s) { return walk(this.body, s, []); },
-  getElementById(id) { return walk(this.body, "#" + id, [])[0] || null; },
-  addEventListener() {},
-};
-documentStub.body.querySelector = (s) => walk(documentStub.body, s, [])[0] || null;
-documentStub.body.querySelectorAll = (s) => walk(documentStub.body, s, []);
+function createFixture(preview, fetcher) {
+  const documentStub = {
+    readyState: "complete",
+    body: makeEl("body", {}),
+    createElement(t) { return makeEl(t.toLowerCase(), {}); },
+    createTextNode(t) { return { nodeType: 3, text: String(t), parent: null }; },
+    querySelector(s) { return walk(this.body, s, [])[0] || null; },
+    querySelectorAll(s) { return walk(this.body, s, []); },
+    getElementById(id) { return walk(this.body, "#" + id, [])[0] || null; },
+    addEventListener() {},
+  };
+  const store = {};
+  const calls = [];
+  let respond = fetcher || (() => { throw new Error("Unexpected fixture request"); });
+  const context = vm.createContext({
+    window: {
+      COPILOT_API_BASE: "http://127.0.0.1:8000",
+      location: { pathname: preview ? "/ui/preview.html" : "/app" },
+    },
+    document: documentStub,
+    navigator: {},
+    localStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+    },
+    fetch: (...args) => { calls.push(args); return respond(...args); },
+    setTimeout,
+    frappe: preview ? undefined : {
+      csrf_token: "synthetic-csrf-token",
+      boot: { copilot_settings: { api_base: "http://inference.invalid:8000" } },
+    },
+  });
+  const source = fs.readFileSync(BUNDLE, "utf8");
+  const ending = source.lastIndexOf("})();");
+  if (ending < 0) throw new Error("Missing bundle closure");
+  vm.runInContext(source.slice(0, ending) +
+    "globalThis.cardRenderers = { renderEditCard, renderWriteCard };\n" +
+    source.slice(ending), context, { filename: BUNDLE });
+  return {
+    document: documentStub, store, calls, context,
+    setFetch(fn) { respond = fn; },
+    q: (s) => documentStub.body.querySelector(s),
+    qa: (s) => documentStub.body.querySelectorAll(s),
+    send(text) {
+      documentStub.getElementById("cp-input").value = text;
+      documentStub.getElementById("cp-send").click();
+    },
+  };
+}
 
 /* ---------- environment stubs ---------- */
-const store = {};
-global.window = { COPILOT_API_BASE: "http://127.0.0.1:8000" };
-global.document = documentStub;
-try { global.navigator = {}; } catch (e) { /* node>=21: getter-only global */ }
-global.localStorage = {
-  getItem: (k) => (k in store ? store[k] : null),
-  setItem: (k, v) => { store[k] = String(v); },
-};
 let fetchImpl = null;
-global.fetch = (...a) => fetchImpl(...a);
 function jsonResp(obj, ok = true, status = 200) {
   return Promise.resolve({ ok, status, json: () => Promise.resolve(obj) });
 }
 
 /* ---------- boot the real bundle ---------- */
-eval(fs.readFileSync(BUNDLE, "utf8"));
+const preview = createFixture(true, (...args) => fetchImpl(...args));
+const documentStub = preview.document;
 
 const results = [];
 function check(name, cond, extra) {
   results.push([cond ? "PASS" : "FAIL", name, cond ? "" : (extra || "")]);
 }
 const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
+
+function deskResponse(sessionId, mode = "employee", answer = "Desk answer") {
+  return jsonResp({ message: {
+    answer, session_id: sessionId, mode, confidence: "high", route: "rag",
+    sources: [], version_info: { status: "unavailable" },
+  } });
+}
+
+async function testDesk() {
+  const desk = createFixture(false);
+  const initialId = desk.store["copilot.session"];
+  check("Desk mode selector is disabled", desk.q("#cp-mode").disabled);
+  for (const mode of ["employee", "developer"]) {
+    desk.setFetch((url, opts) => deskResponse(JSON.parse(opts.body).session_id, mode));
+    desk.send("help");
+    await tick();
+    const [url, opts] = desk.calls[desk.calls.length - 1];
+    const body = JSON.parse(opts.body);
+    check("Desk " + mode + " chat uses only Frappe gateway",
+      url === "/api/method/erpnext_ai_copilot.api.ask" && opts.method === "POST" &&
+      opts.credentials === "same-origin" && opts.redirect === "error" &&
+      opts.headers["X-Frappe-CSRF-Token"] === "synthetic-csrf-token" &&
+      opts.headers["Content-Type"] === "application/json");
+    check("Desk " + mode + " chat sends question/session only",
+      Object.keys(body).sort().join(",") === "question,session_id" &&
+      body.question === "help" && body.session_id === initialId &&
+      !("X-NexMate-Key" in opts.headers));
+    check("Desk synchronizes server-derived " + mode + " mode",
+      desk.q("#cp-mode").value === mode && desk.q("#cp-mode").disabled &&
+      desk.store["copilot.mode"] === mode &&
+      desk.q("#cp-messages").innerHTML.includes("Desk answer"));
+  }
+  const beforeMode = desk.calls.length;
+  desk.q("#cp-mode").value = "employee";
+  desk.q("#cp-mode").dispatch({ type: "change" });
+  check("Desk ignores synthetic selector changes without requests",
+    desk.calls.length === beforeMode && desk.store["copilot.mode"] === "developer");
+
+  for (const command of ["/read", "/search", "/explain", "/edit", "/newdoc", "/editdoc"]) {
+    for (const suffix of ["", " synthetic arguments"]) {
+      const before = desk.calls.length;
+      desk.send(command + suffix);
+      await tick();
+      check("Desk refuses " + command + (suffix ? " with arguments" : " bare") + " locally",
+        desk.calls.length === before &&
+        desk.q("#cp-messages").lastElementChild.innerHTML.includes("unavailable in Desk"));
+    }
+  }
+
+  const beforeCards = desk.calls.length;
+  for (const [renderer, proposal] of [
+    ["renderEditCard", { path: "synthetic.py", diff: "-old\n+new", proposal_id: "stale-edit", expires_minutes: 15 }],
+    ["renderWriteCard", { action: "create", doctype: "Customer", name: "", env_label: "staging",
+      preview: { body: {} }, reason: "synthetic", proposal_id: "stale-write", expires_minutes: 15 }],
+  ]) {
+    const message = makeEl("div", {});
+    desk.q("#cp-messages").appendChild(message);
+    desk.context.cardRenderers[renderer](message, proposal);
+    message.click();
+    message.querySelector(".cp-card").click();
+    check("Desk " + renderer + " has no executable approve or reject controls",
+      message.innerHTML.includes("unavailable in Desk") &&
+      message.querySelectorAll("button").length === 0 &&
+      !message.innerHTML.includes("cp-committed") &&
+      !message.innerHTML.includes("cp-rejected") && desk.calls.length === beforeCards);
+  }
+
+  const beforeFresh = desk.calls.length;
+  desk.q("#cp-fresh").click();
+  check("Desk start-fresh replaces ID and clears transcript without server reset",
+    desk.store["copilot.session"] !== initialId && desk.calls.length === beforeFresh &&
+    desk.qa(".cp-msg").length === 0 && desk.qa(".cp-empty").length === 1);
+
+  const marker = "synthetic-private-upstream-detail";
+  for (const [name, response] of [
+    ["HTTP", () => jsonResp({ message: marker, detail: marker, _server_messages: marker }, false, 503)],
+    ["network", () => Promise.reject(new Error(marker))],
+    ["invalid JSON", () => Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new Error(marker)) })],
+    ["invalid envelope", () => jsonResp({ message: marker })],
+  ]) {
+    desk.setFetch(response);
+    const before = desk.calls.length;
+    desk.send("help");
+    await tick();
+    const html = desk.q("#cp-messages").lastElementChild.innerHTML;
+    check("Desk " + name + " failure is sanitized without FastAPI fallback",
+      desk.calls.length === before + 1 &&
+      desk.calls[before][0] === "/api/method/erpnext_ai_copilot.api.ask" &&
+      html.includes("NexMate assistant is unavailable") && !html.includes(marker));
+  }
+
+  for (const outcome of ["success", "failure"]) {
+    const delayed = createFixture(false);
+    let resolveOld, rejectOld, resolveFresh;
+    delayed.setFetch(() => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject; }));
+    const oldId = delayed.store["copilot.session"];
+    const oldMode = delayed.store["copilot.mode"];
+    delayed.send("old question");
+    const oldShell = delayed.q("#cp-messages").lastElementChild;
+    const oldHtml = oldShell.innerHTML;
+    delayed.q("#cp-fresh").click();
+    const freshId = delayed.store["copilot.session"];
+    check("Desk reset while " + outcome + " is pending permits a fresh chat locally",
+      freshId !== oldId && delayed.calls.length === 1 && !delayed.q("#cp-send").disabled &&
+      delayed.qa(".cp-empty").length === 1);
+    delayed.setFetch(() => new Promise((resolve) => { resolveFresh = resolve; }));
+    delayed.send("fresh question");
+    check("Desk next chat uses fresh ID before old " + outcome + " settles",
+      delayed.calls.length === 2 && JSON.parse(delayed.calls[1][1].body).session_id === freshId);
+    const freshHtml = delayed.q("#cp-messages").innerHTML;
+    if (outcome === "success") resolveOld(await deskResponse(oldId, "employee", "stale answer"));
+    else rejectOld(new Error(marker));
+    await tick();
+    check("Desk ignores stale " + outcome + " including state, UI and busy cleanup",
+      delayed.store["copilot.session"] === freshId && delayed.store["copilot.mode"] === oldMode &&
+      delayed.q("#cp-mode").value === "" && delayed.q("#cp-send").disabled &&
+      delayed.q("#cp-messages").innerHTML === freshHtml && oldShell.innerHTML === oldHtml);
+    const beforeDuplicate = delayed.calls.length;
+    delayed.send("duplicate while waiting");
+    check("Desk stale " + outcome + " cannot unblock a pending fresh request",
+      delayed.calls.length === beforeDuplicate);
+    resolveFresh(await deskResponse(freshId, "employee", "fresh answer"));
+    await tick();
+    check("Desk fresh response remains usable after stale " + outcome,
+      delayed.store["copilot.session"] === freshId && !delayed.q("#cp-send").disabled &&
+      delayed.q("#cp-messages").innerHTML.includes("fresh answer") &&
+      delayed.q("#cp-mode").value === "employee");
+  }
+  check("Desk fixture never contacts FastAPI",
+    desk.calls.every(([url]) => url === "/api/method/erpnext_ai_copilot.api.ask"));
+}
 
 (async () => {
   const q = (s) => documentStub.body.querySelector(s);
@@ -350,6 +510,8 @@ const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
     fetchedBody && fetchedBody.question === "hi");
   check("no length-validation note appears",
     qa(".cp-systemnote").length === notesBefore);
+
+  await testDesk();
 
   let failed = 0;
   for (const [st, name, extra] of results) {
