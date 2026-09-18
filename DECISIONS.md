@@ -485,3 +485,9 @@ establish safe multi-user deployment. No release, production-write approval,
 private-data cloud consent, live test/model call or successor implementation
 is authorized by this planning entry. Stop and ask if an additional
 substantive user choice is discovered before dependent implementation.
+
+## [2026-09-18] frappe-owned-conversation-state: implementation findings
+**Decision:** Frappe-owned `NexMate Conversation` records (owner+site, child turns) replace the deleted JSON session store; gateway `ask()` pre-appends the user turn with an explicit commit before the upstream call; inference validates envelope consistency only and persists nothing; legacy session paths fail explicitly.
+**Context:** Live Bench verification exposed two facts the plan did not foresee: (1) Frappe rolls back errored requests, so the designed orphan-turn discipline required an explicit pre-append commit; (2) stock Frappe only syncs DocType JSONs from inside module directories and requires controller stubs plus an `app_description` hook, so the app carries a real Desk-module subpackage (container-only shims documented separately for the pre-existing layout gaps).
+**Alternatives considered:** Accepting rollback (loses the documented orphan-turn guarantee); soft-close instead of delete-by-owner (deferred — no retention policy gives "closed" meaning); bulk-importing JSON sessions (rejected — fabricates ownership).
+**Consequences:** Trust boundary from the review stands (Frappe authoritative; inference never authorizes ownership; privileged roles cannot bypass API owner checks; concurrent appends serialize under row locks with loud conflicts). `ARCHITECTURE.md` still describes the JSON store — left for a separate HLD reconciliation. No production readiness, ACL retrieval, streaming, or successor work is authorized by this entry.

@@ -1,10 +1,4 @@
-# frappe-api-gateway Specification
-
-## Purpose
-
-Authenticated Frappe chat entry, authoritative persona selection, validated identity/site assertions and deterministic backend tool denial. Conversations are Frappe-owned records; inference is stateless about ownership.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Authenticated constructed chat request
 Frappe SHALL expose one non-guest whitelisted `ask()` method using standard Frappe authentication and applicable session CSRF checks. It SHALL construct a bounded upstream `/orchestrate` request from question, the authenticated user, authoritative current site, derived mode, fixed `execution_scope="chat-only"`, and — when the caller supplies an owned conversation identifier — that identifier plus the bounded authorized turn history loaded from the Frappe-owned record. Calls without a conversation identifier SHALL be stateless single turns. Legacy caller-owned `session_id` forwarding and JSON storage SHALL NOT be used. It SHALL use a server-configured destination and credential, not forward arbitrary browser objects, headers, paths or URLs. Browser mode SHALL be ignored; user/site/scope/operation/target/history override fields SHALL be refused. Errors SHALL be bounded and sanitized.
@@ -28,25 +22,6 @@ Frappe SHALL expose one non-guest whitelisted `ask()` method using standard Frap
 #### Scenario: Foreign conversation identifier refused
 - **WHEN** the identifier names a record owned by someone else or bound to another site
 - **THEN** Frappe refuses without reading history or reaching inference
-
-### Requirement: Authoritative role-derived persona
-Frappe SHALL derive mode from the authenticated user's actual roles against server-managed `nexmate_developer_roles`, default `[]`. Only an explicit matching role SHALL select `developer`; otherwise select `employee`. There SHALL be no implicit System Manager or Administrator elevation. Invalid mapping configuration SHALL fail closed without elevation. No browser mapping-management endpoint SHALL be added. Persona SHALL NOT grant tool access, document/corpus permission, ownership or cloud consent.
-
-#### Scenario: Empty default includes administrators
-- **WHEN** the mapping is empty and an authenticated user, including System Manager or Administrator, asks a question
-- **THEN** the gateway supplies employee mode
-
-#### Scenario: Explicit configured role match
-- **WHEN** the authenticated user's roles match an explicitly configured developer role
-- **THEN** the gateway supplies developer mode but still enforces chat-only scope
-
-#### Scenario: Browser mode ignored
-- **WHEN** a user submits a browser-selected mode
-- **THEN** Frappe discards it and independently derives mode from the authenticated user
-
-#### Scenario: Invalid mapping
-- **WHEN** the configured role mapping is malformed
-- **THEN** the gateway fails closed without selecting developer mode
 
 ### Requirement: Validated identity and single-project site binding
 Inference SHALL validate gateway context before history access, routing, retrieval or execution, not merely record it in telemetry. User and site SHALL be nonempty strings of at most 255 characters, without leading/trailing whitespace or control characters; Guest SHALL be refused. Mode SHALL be one of the supported personas and scope exactly `chat-only`. Site SHALL exactly match one trusted server-configured `NEXMATE_FRAPPE_SITE`; missing/invalid configuration or mismatch SHALL refuse gateway work. When a conversation is supplied, its identifier, owner, and site SHALL be validated against the envelope user and the trusted site before any supplied turn is used, and supplied turns SHALL be bounded. This fixed binding SHALL NOT implement tenant routing, repository selection, or site-isolated storage. Inference SHALL NOT persist per-conversation state; durable ownership lives in Frappe alone.
@@ -73,27 +48,6 @@ Any supplied gateway-envelope field (`user`, `site`, `execution_scope`, conversa
 - **WHEN** a supplied conversation names a different owner than the envelope user or a different site than the trusted site
 - **THEN** inference refuses before any supplied turn is used, with no persistence side effect
 
-### Requirement: Deterministic backend chat-only execution guard
-Gateway context SHALL carry an immutable request-local empty tool allowance enforced in backend code BEFORE tool invocation. It SHALL forbid read/search/explain/file/code/Git operations, ERPNext schema/document/list reads, business writes, proposals/apply, approval and session reset. Natural-language, troubleshooting, follow-ups, model-selected routes, fallbacks and developer mode SHALL NOT bypass it. It SHALL suppress incidental live ERPNext version lookups even on RAG/conversational paths. Denial SHALL precede execution, not filter results afterward. UI restrictions or model instructions alone SHALL NOT satisfy this requirement.
-
-Conversational replies and existing cited RAG SHALL remain chat behavior, without claiming ACL retrieval or granting new private-corpus permission. Capability replies SHALL describe only available chat operations. Legacy direct tool access remains governed separately, never a gateway fallback.
-
-#### Scenario: Natural-language code or business request
-- **WHEN** a gateway question selects code/search/explain, ERPNext schema/list/document or proposal/write behavior, including in developer mode
-- **THEN** deterministic backend enforcement returns unavailable-in-Desk behavior before any corresponding tool/client call
-
-#### Scenario: Forced routes and fallbacks
-- **WHEN** routing or mocked model output forces code, ERPNext, troubleshooting-to-code or a fallback/follow-up tool path
-- **THEN** the unchanged chat-only context prevents all tool invocations regardless of wording or slash syntax
-
-#### Scenario: Incidental version lookup
-- **WHEN** gateway chat takes a RAG or other path normally fetching ERPNext versions
-- **THEN** no live ERPNext call occurs and the response uses unavailable-version semantics without fabricated installed versions
-
-#### Scenario: Explicit operation or approval
-- **WHEN** a gateway request attempts read/search/explain/file/edit/business/reset/approval operation forwarding
-- **THEN** it is refused with no tool endpoint proxy or execution path
-
 ### Requirement: Desk communicates only through Frappe
 Desk chat SHALL use the authenticated Frappe method and SHALL NEVER directly call inference, including on gateway failure, mode changes, slash commands, approval/rejection handlers, or transcript restore. Unavailable tools/cards SHALL be disabled/refused, including stale cards. Start-fresh SHALL invoke the owner-checked server-side reset of the current owned conversation and replace the local conversation reference; with no owned conversation it SHALL only clear locally. Transcript restore SHALL read only the owner's bounded transcript through Frappe. Standalone preview SHALL remain separate under the dual explicit development configuration; it SHALL receive no service credential, SHALL NOT enable Desk fallback, and SHALL be stateless.
 
@@ -112,3 +66,9 @@ Desk chat SHALL use the authenticated Frappe method and SHALL NEVER directly cal
 #### Scenario: Preview isolation
 - **WHEN** standalone preview is exercised under explicit development opt-in
 - **THEN** no key is delivered to its browser, no thread is persisted, and the Desk-only-Frappe rule remains unchanged
+
+## REMOVED Requirements
+
+### Requirement: Transitional session forwarding and required successor
+**Reason**: Superseded — this change delivers the Frappe-owned successor, so transitional caller-owned forwarding ends here.
+**Migration**: Use owned conversation identifiers and lifecycle methods defined in `frappe-owned-conversation-state`; legacy `session_id` values are no longer accepted for continuity.

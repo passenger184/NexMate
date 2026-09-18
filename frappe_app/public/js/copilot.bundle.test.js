@@ -139,7 +139,7 @@ function walk(node, sel, acc) {
   }
   return acc;
 }
-function createFixture(preview, fetcher) {
+function createFixture(preview, fetcher, seed) {
   const documentStub = {
     readyState: "complete",
     body: makeEl("body", {}),
@@ -151,6 +151,7 @@ function createFixture(preview, fetcher) {
     addEventListener() {},
   };
   const store = {};
+  if (seed) Object.assign(store, seed);
   const calls = [];
   let respond = fetcher || (() => { throw new Error("Unexpected fixture request"); });
   const context = vm.createContext({
@@ -163,6 +164,7 @@ function createFixture(preview, fetcher) {
     localStorage: {
       getItem: (k) => (k in store ? store[k] : null),
       setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
     },
     fetch: (...args) => { calls.push(args); return respond(...args); },
     setTimeout,
@@ -205,19 +207,42 @@ function check(name, cond, extra) {
 }
 const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
 
-function deskResponse(sessionId, mode = "employee", answer = "Desk answer") {
+function deskResponse(conversationId, mode = "employee", answer = "Desk answer") {
   return jsonResp({ message: {
-    answer, session_id: sessionId, mode, confidence: "high", route: "rag",
+    answer, conversation_id: conversationId, mode, confidence: "high", route: "rag",
     sources: [], version_info: { status: "unavailable" },
   } });
 }
 
+function deskRouter() {
+  let n = 0;
+  return (url, opts) => {
+    const body = opts && opts.body ? JSON.parse(opts.body) : {};
+    if (url === "/api/method/erpnext_ai_copilot.api.start_conversation") {
+      n += 1;
+      return jsonResp({ message: { conversation_id: "NM-0000" + n } });
+    }
+    if (url === "/api/method/erpnext_ai_copilot.api.get_conversation")
+      return jsonResp({ message: { conversation_id: body.conversation_id, turns: [] } });
+    if (url === "/api/method/erpnext_ai_copilot.api.reset_conversation")
+      return jsonResp({ message: { reset: true } });
+    if (url === "/api/method/erpnext_ai_copilot.api.ask")
+      return deskResponse(body.conversation_id, "employee");
+    throw new Error("Unexpected Desk request: " + url);
+  };
+}
+
 async function testDesk() {
-  const desk = createFixture(false);
-  const initialId = desk.store["copilot.session"];
+  const router = deskRouter();
+  const desk = createFixture(false, (...args) => router(...args));
+  await tick(30);
+  check("Desk auto-starts an owned conversation on load",
+    desk.store["copilot.conversation"] === "NM-00001" &&
+    desk.calls.some(([url]) => url === "/api/method/erpnext_ai_copilot.api.start_conversation"));
+  const initialId = desk.store["copilot.conversation"];
   check("Desk mode selector is disabled", desk.q("#cp-mode").disabled);
   for (const mode of ["employee", "developer"]) {
-    desk.setFetch((url, opts) => deskResponse(JSON.parse(opts.body).session_id, mode));
+    desk.setFetch((url, opts) => deskResponse(JSON.parse(opts.body).conversation_id, mode));
     desk.send("help");
     await tick();
     const [url, opts] = desk.calls[desk.calls.length - 1];
@@ -227,9 +252,9 @@ async function testDesk() {
       opts.credentials === "same-origin" && opts.redirect === "error" &&
       opts.headers["X-Frappe-CSRF-Token"] === "synthetic-csrf-token" &&
       opts.headers["Content-Type"] === "application/json");
-    check("Desk " + mode + " chat sends question/session only",
-      Object.keys(body).sort().join(",") === "question,session_id" &&
-      body.question === "help" && body.session_id === initialId &&
+    check("Desk " + mode + " chat sends question/conversation only",
+      Object.keys(body).sort().join(",") === "conversation_id,question" &&
+      body.question === "help" && body.conversation_id === initialId &&
       !("X-NexMate-Key" in opts.headers));
     check("Desk synchronizes server-derived " + mode + " mode",
       desk.q("#cp-mode").value === mode && desk.q("#cp-mode").disabled &&
@@ -271,10 +296,16 @@ async function testDesk() {
       !message.innerHTML.includes("cp-rejected") && desk.calls.length === beforeCards);
   }
 
+  desk.setFetch((...args) => router(...args));
   const beforeFresh = desk.calls.length;
   desk.q("#cp-fresh").click();
-  check("Desk start-fresh replaces ID and clears transcript without server reset",
-    desk.store["copilot.session"] !== initialId && desk.calls.length === beforeFresh &&
+  await tick(30);
+  const freshUrls = desk.calls.slice(beforeFresh).map(([url]) => url);
+  check("Desk start-fresh resets the owned thread server-side then starts a new one",
+    freshUrls[0] === "/api/method/erpnext_ai_copilot.api.reset_conversation" &&
+    JSON.parse(desk.calls[beforeFresh][1].body).conversation_id === initialId &&
+    freshUrls[1] === "/api/method/erpnext_ai_copilot.api.start_conversation" &&
+    desk.store["copilot.conversation"] !== initialId &&
     desk.qa(".cp-msg").length === 0 && desk.qa(".cp-empty").length === 1);
 
   const marker = "synthetic-private-upstream-detail";
@@ -296,29 +327,39 @@ async function testDesk() {
   }
 
   for (const outcome of ["success", "failure"]) {
-    const delayed = createFixture(false);
     let resolveOld, rejectOld, resolveFresh;
-    delayed.setFetch(() => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject; }));
-    const oldId = delayed.store["copilot.session"];
+    let starts = 0;
+    const delayed = createFixture(false, (url, opts) => {
+      if (url === "/api/method/erpnext_ai_copilot.api.start_conversation") {
+        starts += 1;
+        return jsonResp({ message: { conversation_id: "NM-0000" + (starts + 1) } });
+      }
+      if (url === "/api/method/erpnext_ai_copilot.api.reset_conversation")
+        return jsonResp({ message: { reset: true } });
+      return new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject; });
+    });
+    await tick(30);
+    const oldId = delayed.store["copilot.conversation"];
     const oldMode = delayed.store["copilot.mode"];
     delayed.send("old question");
     const oldShell = delayed.q("#cp-messages").lastElementChild;
     const oldHtml = oldShell.innerHTML;
     delayed.q("#cp-fresh").click();
-    const freshId = delayed.store["copilot.session"];
+    await tick(30);
+    const freshId = delayed.store["copilot.conversation"];
     check("Desk reset while " + outcome + " is pending permits a fresh chat locally",
-      freshId !== oldId && delayed.calls.length === 1 && !delayed.q("#cp-send").disabled &&
+      freshId !== oldId && !delayed.q("#cp-send").disabled &&
       delayed.qa(".cp-empty").length === 1);
     delayed.setFetch(() => new Promise((resolve) => { resolveFresh = resolve; }));
     delayed.send("fresh question");
     check("Desk next chat uses fresh ID before old " + outcome + " settles",
-      delayed.calls.length === 2 && JSON.parse(delayed.calls[1][1].body).session_id === freshId);
+      JSON.parse(delayed.calls[delayed.calls.length - 1][1].body).conversation_id === freshId);
     const freshHtml = delayed.q("#cp-messages").innerHTML;
     if (outcome === "success") resolveOld(await deskResponse(oldId, "employee", "stale answer"));
     else rejectOld(new Error(marker));
     await tick();
     check("Desk ignores stale " + outcome + " including state, UI and busy cleanup",
-      delayed.store["copilot.session"] === freshId && delayed.store["copilot.mode"] === oldMode &&
+      delayed.store["copilot.conversation"] === freshId && delayed.store["copilot.mode"] === oldMode &&
       delayed.q("#cp-mode").value === "" && delayed.q("#cp-send").disabled &&
       delayed.q("#cp-messages").innerHTML === freshHtml && oldShell.innerHTML === oldHtml);
     const beforeDuplicate = delayed.calls.length;
@@ -328,12 +369,46 @@ async function testDesk() {
     resolveFresh(await deskResponse(freshId, "employee", "fresh answer"));
     await tick();
     check("Desk fresh response remains usable after stale " + outcome,
-      delayed.store["copilot.session"] === freshId && !delayed.q("#cp-send").disabled &&
+      delayed.store["copilot.conversation"] === freshId && !delayed.q("#cp-send").disabled &&
       delayed.q("#cp-messages").innerHTML.includes("fresh answer") &&
       delayed.q("#cp-mode").value === "employee");
   }
+  {
+    const restoring = createFixture(false, (url, opts) => {
+      const body = opts && opts.body ? JSON.parse(opts.body) : {};
+      if (url === "/api/method/erpnext_ai_copilot.api.get_conversation")
+        return jsonResp({ message: { conversation_id: body.conversation_id, turns: [
+          { role: "user", content: "earlier question" },
+          { role: "assistant", content: "earlier answer" },
+        ] } });
+      if (url === "/api/method/erpnext_ai_copilot.api.start_conversation")
+        return jsonResp({ message: { conversation_id: "NM-00009" } });
+      throw new Error("Unexpected Desk request: " + url);
+    }, { "copilot.conversation": "NM-00007" });
+    await tick(30);
+    const restoredHtml = restoring.q("#cp-messages").innerHTML;
+    check("Desk restores only the owner's thread on reload",
+      restoredHtml.includes("earlier question") && restoredHtml.includes("earlier answer") &&
+      restoredHtml.includes("cp-msg-user") && restoredHtml.includes("cp-answer") &&
+      !restoredHtml.includes("NM-00007") && !restoredHtml.includes("NM-00009") &&
+      restoring.store["copilot.conversation"] === "NM-00007" &&
+      restoring.qa(".cp-empty").length === 0);
+  }
+  {
+    const denied = createFixture(false, (url) => {
+      if (url === "/api/method/erpnext_ai_copilot.api.get_conversation")
+        return jsonResp({ message: "gone" }, false, 403);
+      if (url === "/api/method/erpnext_ai_copilot.api.start_conversation")
+        return jsonResp({ message: { conversation_id: "NM-00003" } });
+      throw new Error("Unexpected Desk request: " + url);
+    }, { "copilot.conversation": "NM-00002" });
+    await tick(30);
+    check("Desk falls back to a fresh owned thread when restore is refused",
+      denied.store["copilot.conversation"] === "NM-00003" &&
+      denied.qa(".cp-empty").length === 1);
+  }
   check("Desk fixture never contacts FastAPI",
-    desk.calls.every(([url]) => url === "/api/method/erpnext_ai_copilot.api.ask"));
+    desk.calls.every(([url]) => url.startsWith("/api/method/erpnext_ai_copilot.api.")));
 }
 
 (async () => {

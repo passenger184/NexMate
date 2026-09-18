@@ -37,8 +37,10 @@
   }
 
   // ---------- state ----------
+  // Desk threads are Frappe-owned conversation records; the browser keeps
+  // only the identifier. Preview is stateless and keeps no identifier.
   var S = {
-    sessionId: null,
+    conversationId: null,
     conversationToken: 0,
     mode: "developer",
     busy: false,
@@ -47,14 +49,14 @@
 
   function loadState() {
     try {
-      S.sessionId = localStorage.getItem("copilot.session") || null;
+      S.conversationId = localStorage.getItem("copilot.conversation") || null;
       S.mode = localStorage.getItem("copilot.mode") || "developer";
     } catch (e) { /* private mode */ }
-    if (!S.sessionId) newSession(false);
   }
   function persist() {
     try {
-      localStorage.setItem("copilot.session", S.sessionId);
+      if (S.conversationId) localStorage.setItem("copilot.conversation", S.conversationId);
+      else localStorage.removeItem("copilot.conversation");
       localStorage.setItem("copilot.mode", S.mode);
     } catch (e) { /* ignore */ }
   }
@@ -62,9 +64,7 @@
     S.conversationToken++;
     S.busy = false;
     if (S.els.sendBtn) S.els.sendBtn.disabled = false;
-    S.sessionId =
-      "s-" + Date.now().toString(36) + "-" +
-      Math.random().toString(36).slice(2, 8);
+    S.conversationId = null;
     persist();
     if (rerender !== false) {
       S.els.messages.innerHTML = "";
@@ -360,7 +360,7 @@
   function chatRequest(question) {
     if (isPreview) {
       return post("/orchestrate", {
-        question: question, session_id: S.sessionId, mode: S.mode,
+        question: question, mode: S.mode,
       });
     }
     var headers = { "Content-Type": "application/json" };
@@ -371,7 +371,7 @@
       credentials: "same-origin",
       redirect: "error",
       headers: headers,
-      body: JSON.stringify({ question: question, session_id: S.sessionId }),
+      body: JSON.stringify({ question: question, conversation_id: S.conversationId }),
     }).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (j) {
         if (!r.ok || !j || !j.message || typeof j.message.answer !== "string")
@@ -384,12 +384,76 @@
     });
   }
 
+  // ---------- owned Desk conversations (Frappe methods only) ----------
+  function frappeCall(method, body) {
+    var headers = { "Content-Type": "application/json" };
+    if (typeof frappe !== "undefined" && frappe.csrf_token)
+      headers["X-Frappe-CSRF-Token"] = frappe.csrf_token;
+    return fetch("/api/method/erpnext_ai_copilot.api." + method, {
+      method: "POST",
+      credentials: "same-origin",
+      redirect: "error",
+      headers: headers,
+      body: JSON.stringify(body || {}),
+    }).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (j) {
+        if (!r.ok || !j || !j.message) throw serverError(r.status, j);
+        return j.message;
+      });
+    });
+  }
+  function startDeskConversation() {
+    return frappeCall("start_conversation", {}).then(function (m) {
+      if (!m || typeof m.conversation_id !== "string")
+        throw new Error("NexMate assistant is unavailable. Please try again later.");
+      S.conversationId = m.conversation_id;
+      persist();
+    });
+  }
+  function renderRestored(content) {
+    var m = el("div", "cp-msg cp-msg-a");
+    m.appendChild(el("div", "cp-answer", md(content)));
+    S.els.messages.appendChild(m);
+  }
+  function showEmptyIfBlank() {
+    if (!S.els.messages.children.length) emptyState();
+  }
+  function restoreDeskConversation() {
+    // Owner-bounded transcript restore; a foreign, deleted, or missing id
+    // simply starts a fresh owned thread instead of failing loudly.
+    if (!S.conversationId) return startDeskConversation().then(showEmptyIfBlank);
+    return frappeCall("get_conversation", { conversation_id: S.conversationId }).then(function (m) {
+      var turns = m.turns || [];
+      if (turns.length) S.els.messages.innerHTML = "";
+      turns.forEach(function (t) {
+        if (!t || typeof t.content !== "string") return;
+        if (t.role === "user") addUser(t.content);
+        else if (t.role === "assistant") renderRestored(t.content);
+      });
+      scrollBottom();
+      showEmptyIfBlank();
+    }).then(null, function () {
+      S.conversationId = null;
+      return startDeskConversation().then(showEmptyIfBlank);
+    });
+  }
+  function freshDeskConversation() {
+    var id = S.conversationId;
+    var reset = id
+      ? frappeCall("reset_conversation", { conversation_id: id })
+      : Promise.resolve(null);
+    newSession();
+    reset.catch(function () {}).then(function () {
+      return startDeskConversation();
+    }).then(null, function () { /* stay local; next send retries */ });
+  }
+
   function askOrchestrate(question) {
     var conversationToken = S.conversationToken;
     var m = addAssistantShell();
     return chatRequest(question).then(function (r) {
       if (conversationToken !== S.conversationToken) return;
-      if (r.session_id) S.sessionId = r.session_id;
+      if (r.conversation_id) S.conversationId = r.conversation_id;
       if (!isPreview && (r.mode === "employee" || r.mode === "developer")) {
         S.mode = r.mode;
         S.els.mode.value = S.mode;
@@ -701,10 +765,8 @@
       systemNote("Switched to " + S.mode + " mode.");
     });
     wrap.querySelector("#cp-fresh").addEventListener("click", function () {
-      if (!isPreview) { newSession(); return; }
-      post("/tools/session/reset", { session_id: S.sessionId })
-        .catch(function () {})
-        .finally(function () { newSession(); });
+      if (!isPreview) { freshDeskConversation(); return; }
+      newSession();
     });
 
     // simple drag-to-resize (UI_SPEC: resizable width)
@@ -725,6 +787,16 @@
     });
 
     if (!S.els.messages.children.length) emptyState();
+    // Desk restores the owner's thread (or starts an owned one); preview
+    // stays stateless and keeps the local empty state. A synchronous
+    // transport failure must never break the panel build itself.
+    if (!isPreview) {
+      try {
+        var restored = restoreDeskConversation();
+        if (restored && restored.then)
+          restored.then(null, function () { showEmptyIfBlank(); });
+      } catch (e) { showEmptyIfBlank(); }
+    }
   }
 
   function systemNote(text) {

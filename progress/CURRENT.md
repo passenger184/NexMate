@@ -1,10 +1,33 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-17 — `authenticated-frappe-control-plane` user-authorized bounded acceptance/handoff recorded: 20/21 tasks complete; only real Bench/Desk verification (6.3) remains open.
+**Last updated:** 2026-09-18 — `frappe-owned-conversation-state` implemented and live-verified in the test Bench (22/22 tasks); no commit/push.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
-**Current task:** Task 6.3 live Bench/Desk verification executed 2026-09-18 (see section below); no commit/push; successor not started.
+**Current task:** Awaiting user review of the `frappe-owned-conversation-state` implementation; archive when approved. Successor work (if any) needs a separately approved change.
 
-## 2026-09-18 Task 6.3 verification — live Bench/Desk acceptance (PASSED with noted limits)
+## 2026-09-18 frappe-owned-conversation-state — implementation and live evidence
+
+Change `openspec/changes/frappe-owned-conversation-state/` (G3): Frappe-owned
+`NexMate Conversation` records (owner+site, child turn table) replace the
+deleted JSON session store; gateway `ask()` takes an optional owned
+`conversation_id` (stateless without); new owner-checked
+start/transcript/reset methods; inference validates envelope consistency
+only and persists nothing; legacy `session_id`/reset paths fail explicitly
+(422/404). Desk auto-starts/restores/resets owned threads; preview
+stateless. Live Bench (`frappe_docker_copilot_test`, site `frontend`):
+migrate created tables; start→ask→transcript→reset verified as
+Administrator; System-Manager probe user refused on admin threads and
+served on its own; 3-way parallel asks serialized (1 winner + 2 loud
+`Conversation is busy` retries, zero lost turns, retry succeeds);
+inference-down ask leaves the lone user turn (explicit pre-append commit);
+backend restart preserves threads; Task 6.3 boundary checks re-verified
+(401s, health, forged-field refusal). Limits: generation LLM unreachable
+here (degraded clarify, no tools), so cited-RAG-with-history is
+unit-covered only; `ARCHITECTURE.md` still describes the old JSON store
+(separate HLD reconciliation, not edited here). Test data cleaned
+(0 threads, probe user disabled). Suites: 202 Python OK, 67 Node PASS.
+No commit/push; live Bench left running with the app installed.
+
+## 2026-09-18 Task 6.3 verification — live Bench/Desk acceptance (PASSED with noted limits) [SUPERSEDED for sessions: threads are now Frappe-owned; boundary checks re-verified above]
 
 Environment (user-scoped to `~/copilot/frappe_docker_copilot_test`, project
 `frappe_docker_copilot_test`): Docker Desktop 4.86.0 recovered from the

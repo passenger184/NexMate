@@ -38,8 +38,11 @@ logger.setLevel(logging.INFO)
 
 import config
 from rag import generator, retriever
-from service import session_store
-from service.auth import ServiceAuthMiddleware, validate_gateway_envelope
+from service.auth import (
+    ServiceAuthMiddleware,
+    validate_conversation_block,
+    validate_gateway_envelope,
+)
 from tools import edit as edit_tool
 from tools import erpnext as erpnext_tool
 from tools import erpnext_write as erpnext_write_tool
@@ -54,14 +57,15 @@ NO_ANSWER = "I don't have a confident answer for this in the knowledge base."
 
 
 class AskRequest(BaseModel):
+    # Owned-conversation successor: continuity lives in Frappe records, so
+    # /ask is stateless. Unknown fields (including legacy session_id) are
+    # refused explicitly rather than silently ignored.
+    model_config = ConfigDict(extra="forbid")
+
     # Transport validity only: non-blank, bounded size. Short messages
     # ("hi", "ok") are conversationally valid — length must never decide
     # that. Blank-only input is not a message and is still rejected.
     question: str = Field(min_length=1, max_length=2000)
-    session_id: str | None = Field(
-        None, pattern=r"[A-Za-z0-9_-]{1,64}",
-        description="optional thread id; enables server-side continuity",
-    )
 
     @field_validator("question")
     @classmethod
@@ -81,17 +85,7 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[Source]
     confidence: Literal["high", "low", "no_match"]
-    session_id: str | None = None
-    turn_count: int | None = None
     condensed_question: str | None = None
-
-
-class SessionResetRequest(BaseModel):
-    session_id: str = Field(pattern=r"[A-Za-z0-9_-]{1,64}")
-
-
-class SessionResetResponse(BaseModel):
-    cleared: bool
 
 
 class ReadFileRequest(BaseModel):
@@ -210,8 +204,12 @@ class OrchestrateRequest(BaseModel):
     # bounded. Conversational validity is the router's job, not the
     # schema's.
     question: str = Field(min_length=1, max_length=2000)
-    session_id: str | None = Field(
-        None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    # Frappe-owned conversation block (validated for consistency in
+    # service.auth; Frappe remains authoritative for ownership). Absent
+    # means a stateless single turn. Legacy caller-owned session_id is
+    # retired: extra="forbid" below refuses it explicitly as
+    # invalid_orchestrate_request instead of silently dropping history.
+    conversation: dict[str, Any] | None = None
     mode: Literal["developer", "employee"] = "developer"
 
     @field_validator("question")
@@ -240,7 +238,7 @@ class OrchestrateResponse(BaseModel):
     route_how: str
     mode: Literal["developer", "employee"]
     version_info: dict
-    session_id: str | None = None
+    conversation_id: str | None = None
     turn_count: int | None = None
     condensed_question: str | None = None
 
@@ -334,14 +332,11 @@ def _dedupe_sources(chunks: list[dict[str, Any]]) -> list[Source]:
 
 @app.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest) -> AskResponse:
+    # Stateless: continuity lives in Frappe-owned conversation records and
+    # arrives via /orchestrate. Every call stands alone.
     history: list[dict[str, str]] = []
-    if req.session_id:
-        try:
-            history = session_store.load_history(req.session_id)
-        except session_store.InvalidSessionId as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Phase 4: anaphoric follow-ups ("which constant did you cite?") don't
+    # Anaphoric follow-ups ("which constant did you cite?") don't
     # retrieve on their own terms — condense against the conversation
     # BEFORE retrieval. Best-effort: on failure we fall back to the raw
     # question (stateless semantics). Gates downstream stay absolute.
@@ -364,48 +359,20 @@ def ask(req: AskRequest) -> AskResponse:
         else generator.generate_answer(req.question, chunks, history)
     )
 
-    turn_count: int | None = None
-    if req.session_id:
-        try:
-            # Persist BOTH sides of the exchange so the next call sees it.
-            n1 = session_store.append_turn(
-                req.session_id, "user", req.question)
-            n2 = session_store.append_turn(
-                req.session_id, "assistant", answer)
-            turn_count = min(n1, n2)
-        except (session_store.InvalidSessionId, RuntimeError) as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-
     if confidence == "no_match":
         return AskResponse(answer=answer, sources=[],
                            confidence="no_match",
-                           session_id=req.session_id,
-                           turn_count=turn_count,
                            condensed_question=condensed)
     if confidence == "low":
         return AskResponse(answer=answer,
                            sources=_dedupe_sources(chunks),
                            confidence="low",
-                           session_id=req.session_id,
-                           turn_count=turn_count,
                            condensed_question=condensed)
 
     return AskResponse(
         answer=answer, sources=_dedupe_sources(chunks), confidence=confidence,
-        session_id=req.session_id, turn_count=turn_count,
         condensed_question=condensed,
     )
-
-
-@app.post("/tools/session/reset", response_model=SessionResetResponse)
-def tools_session_reset(req: SessionResetRequest) -> SessionResetResponse:
-    """"Start fresh": clears the visible thread. Resolved-issue knowledge
-    indexed in Chroma is permanent and deliberately untouched."""
-    try:
-        cleared = session_store.delete_session(req.session_id)
-    except session_store.InvalidSessionId as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return SessionResetResponse(cleared=cleared)
 
 
 @app.get("/health")
@@ -566,19 +533,21 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
     """Phase 6: single entry point routing between RAG, code agent, and
     the live ERPNext tool; injects live instance versions into prompts.
 
-    Sessions behave like /ask (condense-then-retrieve on follow-ups);
-    routing happens on the CONDENSED question when a session is active.
+    History arrives inline from the Frappe-owned conversation record;
+    inference persists nothing per-conversation (ownership-stateless).
+    Routing happens on the CONDENSED question when history is present.
     """
     chat_only = validate_gateway_envelope(req.model_dump(), req.model_fields_set, request)
     import json as _json
     request_id = uuid.uuid4().hex[:12]
     t0 = time.perf_counter()
     history: list[dict[str, str]] = []
-    if req.session_id:
-        try:
-            history = session_store.load_history(req.session_id)
-        except session_store.InvalidSessionId as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    conversation_id: str | None = None
+    if req.conversation is not None:
+        # Already consistency-checked by validate_gateway_envelope;
+        # normalize again here as the single source of truth.
+        history = validate_conversation_block(req.conversation, req.user)
+        conversation_id = req.conversation["id"]
 
     search_question = req.question
     condensed: str | None = None
@@ -589,18 +558,12 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
             search_question = candidate
 
     result = orchestrator.handle_question(
-        search_question, req.session_id, history, mode=req.mode, chat_only=chat_only)
+        search_question, conversation_id, history, mode=req.mode, chat_only=chat_only)
 
+    # Exchanges so far (prior pairs) plus this one; None when stateless.
     turn_count: int | None = None
-    if req.session_id:
-        try:
-            n1 = session_store.append_turn(req.session_id, "user",
-                                           req.question)
-            n2 = session_store.append_turn(req.session_id, "assistant",
-                                           result["answer"])
-            turn_count = min(n1, n2)
-        except (session_store.InvalidSessionId, RuntimeError) as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if conversation_id is not None:
+        turn_count = len(history) // 2 + 1
 
     sources = []
     for s in result.get("sources", []):
@@ -630,7 +593,7 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
     # without a telemetry line; uvicorn access logs cover those.
     logger.info(_json.dumps({
         "request_id": request_id,
-        "conversation_id": req.session_id or "-",
+        "conversation_id": conversation_id or "-",
         "route": route,
         "route_how": result.get("route_how"),
         "detected_intent": result.get("nlu_kind"),
@@ -655,7 +618,7 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
         mode=req.mode,
         version_info=(orchestrator.unavailable_versions() if chat_only
                       else orchestrator.get_instance_versions()),
-        session_id=req.session_id,
+        conversation_id=conversation_id,
         turn_count=turn_count,
         condensed_question=condensed,
     )

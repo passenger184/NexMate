@@ -53,13 +53,13 @@ EXPLAIN_WINDOW_LINES = 14         # context lines around a hit when excerpting
 # Proposals expire: a stale diff applied days later is how mistakes happen.
 EDIT_PROPOSAL_TTL_MINUTES = int(os.environ.get("EDIT_PROPOSAL_TTL_MINUTES", "15"))
 
-# --- Session continuity (Phase 4) ---------------------------------------------
-# Server-side chat history so refreshing the sidebar doesn't lose the
-# thread (docs/PHASE_4_SPEC.md). Stored as JSON files under data/sessions/.
-SESSIONS_DIR = DATA_DIR / "sessions"
+# --- Conversation budgets -----------------------------------------------------
+# History arrives inline from Frappe-owned records
+# (frappe-owned-conversation-state); inference keeps no sessions.
+# SESSION_MAX_TURNS/CHARS bound what enters the prompt; the wire budget in
+# service/auth.py mirrors them with headroom for in-flight threads.
 SESSION_MAX_TURNS = 6        # exchanges (user+assistant) included in prompt
 SESSION_MAX_CHARS = 6000     # hard char ceiling on serialized history
-SESSION_ID_PATTERN = r"[A-Za-z0-9_-]{1,64}"  # filename-safe by construction
 
 # --- ERPNext live API (Phase 5, read-only) -------------------------------------
 ERPNEXT_TIMEOUT_SECONDS = 20

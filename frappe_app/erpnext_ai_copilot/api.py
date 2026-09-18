@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 import frappe
 import requests
 
+from erpnext_ai_copilot import conversations
+
 
 logger = logging.getLogger("nexmate.gateway")
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -15,9 +17,10 @@ MAX_QUESTION_CHARS = 2000
 CONNECT_TIMEOUT_SECONDS = 5
 DEFAULT_INFERENCE_TIMEOUT_SECONDS = 300
 MAX_INFERENCE_TIMEOUT_SECONDS = 900
-ALLOWED_FORM_FIELDS = frozenset({"cmd", "question", "session_id", "mode"})
+ALLOWED_FORM_FIELDS = frozenset({"cmd", "question", "conversation_id", "mode"})
+CONVERSATION_FORM_FIELDS = frozenset({"cmd", "conversation_id"})
 RESPONSE_FIELDS = (
-    "answer", "sources", "confidence", "route", "mode", "session_id", "version_info",
+    "answer", "sources", "confidence", "route", "mode", "conversation_id", "version_info",
 )
 
 
@@ -90,6 +93,7 @@ def _forward(url: str, key: str, envelope: dict, read_timeout: float) -> dict | 
         if not isinstance(data, dict) or not set(RESPONSE_FIELDS) <= data.keys():
             return "gateway_upstream_protocol_error"
         result = {field: data[field] for field in RESPONSE_FIELDS}
+        expected_id = (envelope.get("conversation") or {}).get("id")
         if (not isinstance(result["answer"], str)
                 or not isinstance(result["sources"], list)
                 or not all(isinstance(source, dict) for source in result["sources"])
@@ -97,7 +101,7 @@ def _forward(url: str, key: str, envelope: dict, read_timeout: float) -> dict | 
                 or result["route"] not in ("erpnext", "code", "rag", "smalltalk",
                                            "capability", "clarify", "out_of_scope")
                 or result["mode"] != envelope["mode"]
-                or result["session_id"] != envelope.get("session_id")
+                or result["conversation_id"] != expected_id
                 or not isinstance(result["version_info"], dict)):
             return "gateway_upstream_protocol_error"
         serialized = json.dumps(result).lower()
@@ -113,24 +117,26 @@ def _forward(url: str, key: str, envelope: dict, read_timeout: float) -> dict | 
         return "gateway_upstream_transport_error"
 
 
-@frappe.whitelist()
-def ask(question: str, session_id: str | None = None) -> dict:
+def _authenticated_user() -> str:
     user = frappe.session.user
     if not user or user == "Guest":
         frappe.throw("Authentication required.", frappe.PermissionError)
+    return user
+
+
+def _refuse_extra_fields(allowed: frozenset) -> None:
     form = getattr(frappe, "form_dict", {})
-    if set(form) - ALLOWED_FORM_FIELDS:
+    if set(form) - allowed:
         logger.warning("unsupported_gateway_fields")
         frappe.throw("unsupported_gateway_fields")
+
+
+def _gateway_context() -> tuple:
+    """(user, site, key, url, read_timeout) or throws a safe error."""
+    user = _authenticated_user()
     site = getattr(frappe.local, "site", None)
     if not _valid_identity(user) or not _valid_identity(site):
         frappe.throw("NexMate gateway configuration error.")
-    if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_CHARS:
-        frappe.throw("Invalid chat question.")
-    if session_id is not None and (
-            not isinstance(session_id, str)
-            or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", session_id) is None):
-        frappe.throw("Invalid session identifier.")
     key = frappe.conf.get("nexmate_service_key")
     url = _inference_url()
     if not _valid_key(key) or url is None:
@@ -139,6 +145,65 @@ def ask(question: str, session_id: str | None = None) -> dict:
     if read_timeout is None:
         logger.warning("invalid_inference_timeout_config")
         frappe.throw("invalid_inference_timeout_config")
+    return user, site, key, url, read_timeout
+
+
+def _conversation_id_argument(value: object) -> str:
+    if not conversations.valid_conversation_id(value):
+        frappe.throw("Invalid conversation identifier.")
+    return value
+
+
+def _owned(factory, *args):
+    """Run a conversations helper, mapping domain errors to safe throws.
+
+    The throw happens outside the except block so no exception context
+    chain can carry internals into the sanitized error.
+    """
+    error = None
+    try:
+        return factory(*args)
+    except conversations.ConversationError as exc:
+        error = str(exc)
+    frappe.throw(error)
+
+
+@frappe.whitelist()
+def start_conversation() -> dict:
+    """Create an owned thread for the authenticated user; returns its id."""
+    _refuse_extra_fields(CONVERSATION_FORM_FIELDS)
+    user, site, _key, _url, _timeout = _gateway_context()
+    name = conversations.start_conversation(user, site, _mode_for_user(user))
+    return {"conversation_id": name}
+
+
+@frappe.whitelist()
+def get_conversation(conversation_id: str) -> dict:
+    """Owner-bounded transcript fetch (for UI restore)."""
+    _refuse_extra_fields(CONVERSATION_FORM_FIELDS)
+    _gateway_context()
+    name = _conversation_id_argument(conversation_id)
+    turns = _owned(conversations.read_turns, name)
+    tail = conversations.bounded_tail(turns)
+    return {"conversation_id": name,
+            "turns": tail}
+
+
+@frappe.whitelist()
+def reset_conversation(conversation_id: str) -> dict:
+    """Owner-checked server-side deletion of the thread."""
+    _refuse_extra_fields(CONVERSATION_FORM_FIELDS)
+    _gateway_context()
+    name = _conversation_id_argument(conversation_id)
+    _owned(conversations.reset_conversation, name)
+    return {"reset": True}
+
+
+@frappe.whitelist()
+def ask(question: str, conversation_id: str | None = None) -> dict:
+    user, site, key, url, read_timeout = _gateway_context_for_ask()
+    if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_CHARS:
+        frappe.throw("Invalid chat question.")
     envelope = {
         "question": question,
         "user": user,
@@ -146,10 +211,29 @@ def ask(question: str, session_id: str | None = None) -> dict:
         "mode": _mode_for_user(user),
         "execution_scope": "chat-only",
     }
-    if session_id is not None:
-        envelope["session_id"] = session_id
+    if conversation_id is not None:
+        name = _conversation_id_argument(conversation_id)
+        prior = _owned(conversations.read_turns, name)
+        forward = conversations.bounded_tail(prior)
+        # Pre-append the user turn (locked, budgeted); the forwarded tail
+        # stays the prior turns so downstream condense semantics are
+        # unchanged. Commit immediately: Frappe rolls back the request on
+        # error, but a failed inference call must leave the user turn
+        # standing alone (documented) instead of silently discarding it.
+        _owned(conversations.append_turn, name, "user", question)
+        frappe.db.commit()
+        envelope["conversation"] = {
+            "id": name, "owner": user, "site": site, "turns": forward,
+        }
     result = _forward(url, key, envelope, read_timeout)
     if isinstance(result, str):
         logger.warning(result)
         frappe.throw(result)
+    if conversation_id is not None:
+        _owned(conversations.append_turn, name, "assistant", result["answer"])
     return result
+
+
+def _gateway_context_for_ask() -> tuple:
+    _refuse_extra_fields(ALLOWED_FORM_FIELDS)
+    return _gateway_context()

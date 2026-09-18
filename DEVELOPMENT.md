@@ -127,13 +127,14 @@ Existing conversational/cited cached RAG continues, not live file tools or
 ACL-aware retrieval. There are no gateway tool/proposal/approval/reset
 operations. The disabled Desk mode selector cannot override server persona.
 
-Desk slash commands and stale approval/rejection cards are unavailable;
-start-fresh only clears the local transcript and replaces its local session
-ID, without a server deletion request. Old responses are ignored locally,
-not cancelled remotely. Optional valid legacy `session_id` is still forwarded
-to unchanged JSON storage; filename validation is not ownership, site
-isolation or safe multi-user history. Preview retains legacy reset/tool
-behavior behind the dual opt-in, never as Desk fallback.
+Desk slash commands and stale approval/rejection cards are unavailable.
+Desk start-fresh resets the owned server-side thread (local clear only when
+there is none) and starts a fresh owned conversation; the transcript
+restores from the owner's thread on reload. Old responses are ignored
+locally, not cancelled remotely. Caller-owned `session_id` continuity is
+retired: legacy identifiers are refused explicitly, and the JSON session
+store is removed (leftover files are never read; preview is stateless).
+Preview retains tool behavior behind the dual opt-in, never as Desk fallback.
 
 This increment is not full G2/M2, production readiness, a corpus permission
 grant, release/production-write approval or private-data cloud consent.

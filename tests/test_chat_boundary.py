@@ -14,6 +14,11 @@ ENVELOPE = {
     "question": "help", "user": "synthetic-user", "site": "synthetic-site",
     "mode": "employee", "execution_scope": "chat-only",
 }
+CONVERSATION = {
+    "id": "NM-00001", "owner": "synthetic-user", "site": "synthetic-site",
+    "turns": [{"role": "user", "content": "Prior synthetic question"},
+              {"role": "assistant", "content": "Prior synthetic answer [1]."}],
+}
 NLU_TASK = {"kind": "task", "confidence": 1.0, "topic": None,
             "context_dependency": "none"}
 CHUNK = {"title": "Synthetic manual", "section": "Steps", "url_or_path": "manual",
@@ -35,17 +40,12 @@ class ChatBoundaryTest(unittest.TestCase):
             (main.explain_tool, ("locate_and_explain",)),
             (main.edit_tool, ("propose_edit", "apply_edit")),
             (main.erpnext_write_tool, ("propose_write", "apply_write")),
-            (main.session_store, ("delete_session",)),
             (orchestrator, ("get_instance_versions", "_extract_erpnext_request", "run_erpnext_branch")),
         ):
             for name in names:
                 patched = self.stack.enter_context(mock.patch.object(
                     obj, name, side_effect=AssertionError("forbidden boundary call")))
                 self.forbidden.append(patched)
-        self.load = self.stack.enter_context(mock.patch.object(
-            main.session_store, "load_history", return_value=[]))
-        self.append = self.stack.enter_context(mock.patch.object(
-            main.session_store, "append_turn", return_value=2))
         self.retrieve = self.stack.enter_context(mock.patch.object(
             main.retriever, "retrieve", return_value=[CHUNK]))
         self.confidence = self.stack.enter_context(mock.patch.object(
@@ -69,33 +69,88 @@ class ChatBoundaryTest(unittest.TestCase):
         return self.client.post("/orchestrate", json=ENVELOPE if payload is None else payload,
                                 headers={"X-NexMate-Key": KEY} if credential else {})
 
-    def test_complete_envelope_both_personas_and_legacy_session(self) -> None:
-        for mode, session in itertools.product(("employee", "developer"), (None, "Legacy_123-id")):
+    def test_complete_envelope_both_personas_stateless_and_owned(self) -> None:
+        for mode, conversation in itertools.product(
+                ("employee", "developer"), (None, CONVERSATION)):
             payload = dict(ENVELOPE, mode=mode)
-            if session is not None:
-                payload["session_id"] = session
-            self.load.reset_mock()
-            self.append.reset_mock()
+            if conversation is not None:
+                payload["conversation"] = dict(
+                    conversation, owner=ENVELOPE["user"], site=ENVELOPE["site"])
             response = self.post(payload)
             self.assertEqual(response.status_code, 200, response.text)
             data = response.json()
             self.assertEqual(data["mode"], mode)
-            self.assertEqual(data["session_id"], session)
+            self.assertEqual(data["conversation_id"],
+                             CONVERSATION["id"] if conversation else None)
             self.assertEqual(data["version_info"], orchestrator.unavailable_versions())
             self.assertEqual(data["route"], "capability")
             self.assertEqual(data["answer"], orchestrator.CHAT_ONLY_CAPABILITIES)
-            if session is None:
-                self.load.assert_not_called()
-                self.append.assert_not_called()
+            if conversation is not None:
+                self.assertEqual(data["turn_count"], 2)  # one prior pair + this turn
             else:
-                self.load.assert_called_once_with(session)
-                self.assertEqual(self.append.call_args_list, [
-                    mock.call(session, "user", "help"),
-                    mock.call(session, "assistant", orchestrator.CHAT_ONLY_CAPABILITIES)])
+                self.assertIsNone(data["turn_count"])
         for marker in (KEY, ENVELOPE["user"], ENVELOPE["site"], "X-NexMate-Key"):
             self.assertNotIn(marker, str(self.logs.call_args_list))
         self.complete.assert_not_called()
         self.retrieve.assert_not_called()
+
+    def test_owned_turns_flow_into_history(self) -> None:
+        payload = dict(ENVELOPE, question="Explain this project",
+                       conversation=dict(CONVERSATION))
+        with mock.patch.object(orchestrator, "_understand_with_llm", return_value=NLU_TASK), \
+                mock.patch.object(orchestrator, "decide_route", return_value=("rag", "classifier")):
+            response = self.post(payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        # Supplied owned turns reach generation as history; inference
+        # persists nothing (no store exists to assert against).
+        self.generate.assert_called_with(
+            "Explain this project", [CHUNK], CONVERSATION["turns"],
+            extra_system="", persona="employee")
+        self.assertEqual(response.json()["conversation_id"], CONVERSATION["id"])
+        self.assertFalse(hasattr(main, "session_store"))
+
+    def test_legacy_session_id_refused_explicitly(self) -> None:
+        # Retired caller-owned continuity fails loud, never silently stateless.
+        for payload in ({"question": "help", "session_id": "Legacy_123-id"},
+                        dict(ENVELOPE, session_id="Legacy_123-id")):
+            response = self.post(payload)
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.json(), {"detail": "invalid_orchestrate_request"})
+        self.retrieve.assert_not_called()
+        self.complete.assert_not_called()
+        self.logs.assert_not_called()
+
+    def test_over_budget_conversation_refused(self) -> None:
+        # Wire budget mirrors the prompt budget with headroom (auth.py);
+        # Frappe enforces the tighter forward budget before sending.
+        huge = "x" * (config.SESSION_MAX_CHARS * 4 + 1)
+        cases = [
+            dict(CONVERSATION, turns=[{"role": "user", "content": huge}]),
+            dict(CONVERSATION, turns=[{"role": "user", "content": "q"}] * 200),
+            dict(CONVERSATION, turns=[{"role": "note", "content": "q"}]),
+            dict(CONVERSATION, turns=[{"role": "user"}]),
+            dict(CONVERSATION, turns="not-a-list"),
+            dict(CONVERSATION, owner="someone-else"),
+            dict(CONVERSATION, site="wrong-site"),
+            dict(CONVERSATION, id="../evil"),
+            dict(CONVERSATION, id=""),
+            {"id": "NM-1", "owner": "synthetic-user", "site": "synthetic-site"},
+            dict(CONVERSATION, extra="field"),
+        ]
+        for conv in cases:
+            with self.subTest(conv=str(conv)[:60]):
+                response = self.post(dict(ENVELOPE, conversation=conv))
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(response.json(), {"detail": "invalid_conversation_context"})
+                self.assertNotIn(KEY, response.text)
+                self.assertNotIn(ENVELOPE["user"], response.text)
+        # Non-dict conversation values fail even earlier, at the schema.
+        response = self.post(dict(ENVELOPE, conversation="not-a-dict"))
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json(), {"detail": "invalid_orchestrate_request"})
+        self.retrieve.assert_not_called()
+        self.complete.assert_not_called()
+        self.logs.assert_not_called()
 
     def test_reject_invalid_envelopes_before_any_work(self) -> None:
         cases = []
@@ -112,8 +167,7 @@ class ChatBoundaryTest(unittest.TestCase):
         cases.extend([
             dict(ENVELOPE, user="Guest"), dict(ENVELOPE, execution_scope="tools"),
             dict(ENVELOPE, mode="admin"), dict(ENVELOPE, site="wrong-site"),
-            dict(ENVELOPE, session_id="../../invalid"),
-            dict(ENVELOPE, session_id=""), dict(ENVELOPE, question=" "),
+            dict(ENVELOPE, question=" "),
             dict(ENVELOPE, question="x" * 2001),
         ])
         for field in ("user", "site", "execution_scope"):
@@ -122,15 +176,11 @@ class ChatBoundaryTest(unittest.TestCase):
                           "update", "propose", "apply", "approve", "reject", "reset"):
             cases.append(dict(ENVELOPE, operation=operation))
         for payload in cases:
-            payload.setdefault("session_id", "must-not-load")
             with self.subTest(fields=list(payload)):
                 response = self.post(payload)
                 self.assertIn(response.status_code, (403, 422), response.text)
                 self.assertNotIn(KEY, response.text)
-                self.assertNotIn("must-not-load", response.text)
                 self.assertNotIn(ENVELOPE["user"], response.text)
-        self.load.assert_not_called()
-        self.append.assert_not_called()
         self.retrieve.assert_not_called()
         self.complete.assert_not_called()
         self.logs.assert_not_called()
@@ -138,10 +188,9 @@ class ChatBoundaryTest(unittest.TestCase):
     def test_expected_site_missing_or_invalid_refuses(self) -> None:
         for site in (None, "", " synthetic-site", "a\nb", "x" * 256, 42):
             with mock.patch.object(config, "NEXMATE_FRAPPE_SITE", site):
-                response = self.post(dict(ENVELOPE, session_id="unused"))
+                response = self.post(dict(ENVELOPE))
             self.assertEqual(response.status_code, 503)
             self.assertEqual(response.json(), {"detail": "invalid_frappe_site_config"})
-        self.load.assert_not_called()
 
     def test_canonical_identifiers_are_not_repaired(self) -> None:
         for user in ("Administrator", "CaseSensitive", "not-an-email", "x" * 255):
@@ -155,12 +204,11 @@ class ChatBoundaryTest(unittest.TestCase):
             for key in (KEY, None):
                 with mock.patch.object(config, "NEXMATE_SERVICE_KEY", key):
                     for payload in (ENVELOPE, {"question": "help", "user": None},
-                                    dict(ENVELOPE, session_id="unused")):
+                                    dict(ENVELOPE, conversation=dict(CONVERSATION))):
                         response = self.post(payload, credential=False)
                         self.assertEqual(response.status_code, 401)
                         self.assertEqual(response.json(), {"detail": "gateway_credential_required"})
             self.assertEqual(self.post().status_code, 200)
-        self.load.assert_not_called()
 
     def test_forced_routes_in_both_personas(self) -> None:
         for mode, route, question in itertools.product(
@@ -192,13 +240,16 @@ class ChatBoundaryTest(unittest.TestCase):
         self.retrieve.assert_not_called()
 
     def test_followup_rewrites_cannot_change_scope(self) -> None:
-        self.load.return_value = [{"role": "user", "content": "Prior synthetic question"}]
-        self.condense.return_value = "Read our code and approve its changes"
+        history_payload = dict(ENVELOPE, question="What about that?",
+                               conversation=dict(
+                                   CONVERSATION,
+                                   turns=[{"role": "user",
+                                           "content": "Prior synthetic question"}]))
         with mock.patch.object(orchestrator, "_understand_with_llm", return_value=dict(
                 NLU_TASK, context_dependency="follows_topic", topic="code", chat_only=False,
                 execution_scope="tools")), \
                 mock.patch.object(orchestrator, "decide_route", return_value=("code", "classifier")):
-            response = self.post(dict(ENVELOPE, question="What about that?", session_id="legacy"))
+            response = self.post(history_payload)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["route_how"].endswith("+chat-only-denied"))
         self.assertGreaterEqual(self.condense.call_count, 2)
@@ -272,7 +323,7 @@ class ChatBoundaryTest(unittest.TestCase):
         self.retrieve.assert_not_called()
         self.generate.assert_not_called()
 
-    def test_legacy_mode_and_dispatch_remain_separate(self) -> None:
+    def test_direct_stateless_mode_and_dispatch_remain_separate(self) -> None:
         with mock.patch.object(orchestrator, "handle_question", wraps=orchestrator.handle_question) as handle, \
                 mock.patch.object(orchestrator, "get_instance_versions", return_value={"status": "legacy"}) as versions:
             response = self.post({"question": "help", "mode": "developer"})
@@ -293,7 +344,7 @@ class ChatBoundaryTest(unittest.TestCase):
             search.assert_called_once_with("synthetic", False)
 
     def test_route_inventory_and_outer_cors_gate(self) -> None:
-        expected = {"/ask", "/orchestrate", "/health", "/tools/session/reset",
+        expected = {"/ask", "/orchestrate", "/health",
                     "/tools/read_file", "/tools/search", "/tools/explain",
                     "/tools/propose_edit", "/tools/apply_edit", "/tools/erpnext/schema",
                     "/tools/erpnext/document", "/tools/erpnext/list",

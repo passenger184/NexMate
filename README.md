@@ -205,7 +205,9 @@ task router; direct tool endpoints also remain available. Responses carry
 `route`, `route_how`, and `version_info` (which can report unavailable).
 `mode: "employee"` selects a public-docs persona and orchestration guards
 against code/schema routes; it is caller-supplied, not authenticated
-permission enforcement. Sessions use `session_id`, as on `/ask`.
+permission enforcement. Conversation threads are Frappe-owned records
+(`NexMate Conversation`, bound to authenticated user + site); `ask()` takes
+an optional owned `conversation_id` and is stateless without one.
 A gateway envelope is different: authenticated service credentials plus
 validated user/site/mode and exact `execution_scope="chat-only"` are required
 before history or routing. Partial/invalid envelopes and site mismatch
@@ -245,12 +247,11 @@ Click the **AI** button (bottom-right). What you can do:
 | `/editdoc Customer <name> {"customer_name": "new"} :: reason` | same flow for updates |
 
 In the preview only, the header switch selects **developer** or **employee**
-legacy behavior, not privileges. Preview start-fresh requests server session
-reset, then clears locally even if that request fails. The browser retains
-a session ID and the service retains JSON history, but the visible
-transcript is not restored after reload. Preview tools retain their existing
-confirmation/staging safeguards; preview access is not permission to write.
-The preview is not Bench proof.
+legacy behavior, not privileges. Preview is stateless: start-fresh clears
+locally with no server thread. The browser retains no conversation; the
+visible transcript is not restored after reload. Preview tools retain their
+existing confirmation/staging safeguards; preview access is not permission
+to write. The preview is not Bench proof.
 
 ## Desk sidebar setup outline (unverified)
 
@@ -283,8 +284,9 @@ and Frappe's CSRF token. The non-guest gateway constructs the envelope;
 API/transport failures are sanitized and never trigger direct inference
 fallback. The mode selector is disabled. File/business tools, slash commands,
 proposals and approval/rejection actions are unavailable, including stale
-cards. Desk start-fresh clears the local transcript and replaces the local
-session ID only: old JSON history is not deleted. Pending old responses
+cards. Desk start-fresh resets the owned server-side thread (or clears
+locally when there is none) and starts a fresh owned conversation; the
+transcript restores from the owner's thread on reload. Pending old responses
 cannot restore the cleared UI; this does not cancel server work.
 
 Boot still exposes the legacy address, but no credential; Desk no longer
@@ -344,7 +346,6 @@ rag/retriever.py              # hybrid BM25+vector retrieval, confidence gate
 rag/keyword_index.py          # in-house Okapi BM25 over the Chroma corpus
 rag/generator.py              # THE one litellm call site (provider-agnostic)
 service/main.py               # FastAPI: /ask, /tools/*, /health
-service/session_store.py      # server-side session threads (Phase 4)
 tools/memory.py               # confirmed edits -> resolved_issue chunks
 tools/pathsafe.py             # project-root path safety (the security primitive)
 tools/files.py                # Tier-1 read_file tool

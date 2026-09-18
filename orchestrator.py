@@ -18,8 +18,8 @@ Design rules:
   a TTL, and injected into every generation prompt — answers must fit
   the ACTUAL installed version, not the latest docs.
 - The single litellm call site stays rag.generator._complete.
-- Sessions reuse service.session_store; the RAG branch mirrors
-  service/main.ask's gating exactly (only "high" generates).
+- History arrives inline from Frappe-owned conversation records; the RAG
+  branch mirrors service/main.ask's gating exactly (only "high" generates).
 """
 
 import json
@@ -744,7 +744,7 @@ def run_erpnext_branch(question: str,
 
 def handle_question(
     question: str,
-    session_id: str | None = None,
+    conversation_id: str | None = None,
     history: list[dict[str, str]] | None = None,
     mode: str = "developer",
     *,
@@ -768,7 +768,7 @@ def handle_question(
     the user.
     """
     tag: dict[str, Any] = {}
-    out = _handle_question_inner(question, session_id, history, mode, tag, chat_only)
+    out = _handle_question_inner(question, conversation_id, history, mode, tag, chat_only)
     out = dict(out)
     out.setdefault("nlu_kind", tag.get("nlu_kind"))
     out.setdefault("nlu_confidence", tag.get("nlu_confidence"))
@@ -779,7 +779,7 @@ def handle_question(
 
 def _handle_question_inner(
     question: str,
-    session_id: str | None,
+    conversation_id: str | None,
     history: list[dict[str, str]] | None,
     mode: str,
     tag: dict[str, Any],

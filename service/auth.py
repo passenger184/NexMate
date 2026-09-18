@@ -27,6 +27,61 @@ def valid_identity(value: object) -> bool:
                         for char in value))
 
 
+CONVERSATION_ID_PATTERN = r"[A-Za-z0-9_.~@-]{1,140}"
+# Wire budget mirrors the prompt-budget constants in config.py with headroom
+# for in-flight threads; Frappe enforces the tighter forward budget.
+CONVERSATION_MAX_TURNS = config.SESSION_MAX_TURNS * 4
+CONVERSATION_MAX_CHARS = config.SESSION_MAX_CHARS * 4
+CONVERSATION_TURN_KEYS = frozenset({"role", "content"})
+CONVERSATION_KEYS = frozenset({"id", "owner", "site", "turns"})
+
+
+def valid_conversation_id(value: object) -> bool:
+    # Identical rule to the Frappe side: only identifiers the gateway could
+    # have minted are structurally acceptable.
+    return (isinstance(value, str)
+            and re.fullmatch(CONVERSATION_ID_PATTERN, value) is not None)
+
+
+def _valid_turn(turn: object) -> bool:
+    return (isinstance(turn, dict)
+            and set(turn) == CONVERSATION_TURN_KEYS
+            and turn.get("role") in ("user", "assistant")
+            and isinstance(turn.get("content"), str)
+            and 0 < len(turn["content"]) <= CONVERSATION_MAX_CHARS)
+
+
+def validate_conversation_block(conv: object, user: str) -> list[dict[str, str]]:
+    """Consistency validation for a Frappe-supplied conversation block.
+
+    Frappe is authoritative for user identity, site, and conversation
+    ownership; this check NEVER authorizes ownership itself. It only
+    confirms the block is well-formed and internally consistent with the
+    already-validated envelope (owner equals envelope user, site equals
+    the trusted site) and within wire budget. Anything else fails loud
+    with a safe code and no data. Returns normalized turns.
+    """
+    if (not isinstance(conv, dict) or set(conv) != CONVERSATION_KEYS
+            or not valid_conversation_id(conv.get("id"))):
+        raise HTTPException(status_code=422, detail="invalid_conversation_context")
+    if conv.get("owner") != user:
+        raise HTTPException(status_code=422, detail="invalid_conversation_context")
+    if (not valid_identity(config.NEXMATE_FRAPPE_SITE)
+            or conv.get("site") != config.NEXMATE_FRAPPE_SITE):
+        raise HTTPException(status_code=422, detail="invalid_conversation_context")
+    turns = conv.get("turns")
+    if not isinstance(turns, list) or len(turns) > CONVERSATION_MAX_TURNS:
+        raise HTTPException(status_code=422, detail="invalid_conversation_context")
+    total = 0
+    for turn in turns:
+        if not _valid_turn(turn):
+            raise HTTPException(status_code=422, detail="invalid_conversation_context")
+        total += len(turn["content"])
+    if total > CONVERSATION_MAX_CHARS:
+        raise HTTPException(status_code=422, detail="invalid_conversation_context")
+    return [{"role": turn["role"], "content": turn["content"]} for turn in turns]
+
+
 class ServiceAuthMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -90,4 +145,6 @@ def validate_gateway_envelope(payload: dict, supplied: set[str],
         raise HTTPException(status_code=503, detail="invalid_frappe_site_config")
     if payload["site"] != config.NEXMATE_FRAPPE_SITE:
         raise HTTPException(status_code=403, detail="gateway_site_mismatch")
+    if "conversation" in supplied and payload.get("conversation") is not None:
+        validate_conversation_block(payload["conversation"], payload["user"])
     return True
