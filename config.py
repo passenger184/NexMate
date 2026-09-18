@@ -235,3 +235,39 @@ CONFIDENCE_NO_MATCH_MAX_COVERAGE = 0.05
 # questions (found 2026-08-24). Legit rescues use common vocabulary; the
 # primary cos>=0.80 path is unaffected.
 CONFIDENCE_RARE_TERM_DF_MAX = 4
+
+# --- M4 ACL-aware retrieval ------------------------------------------------
+# Coarse-grained knowledge access (NOT ERPNext permission parity). Chunk
+# metadata: site (empty = global public), visibility in ACL_VISIBILITY_TIERS,
+# allowed_roles (required iff restricted). See rag/acl.py.
+ACL_VISIBILITY_TIERS = ("public", "site", "restricted")
+ACL_DERIVED_BY_MARKER = "frappe-gateway"
+ACL_LEGACY_DERIVED_BY_MARKER = "legacy-direct"
+ACL_CORPUS_VISIBILITY_DEFAULTS = {
+    "public_doc": "public",
+    "company_doc": "site",
+    "our_code": "site",
+    "resolved_issue": "site",
+}
+ACL_SCHEMA_VERSION = 1
+
+# --- M4 index generations --------------------------------------------------
+# Generations live beside the vector store; the active pointer names the
+# collection suffix serving traffic ("" = legacy pre-generation store).
+GENERATIONS_DIR = DATA_DIR / "generations"
+GENERATION_ACTIVE_POINTER = "active.json"
+GENERATION_STAGED_PREFIX = "staged-"
+GENERATION_KEEP_PRIOR = 1  # prior generations retained for rollback
+
+# --- M4 egress policy ------------------------------------------------------
+# Deny-by-default: a provider call transmits only under an explicit
+# (data_class, provider, purpose) grant. The configured generation provider
+# is granted its standard purposes; local embeddings are granted; anything
+# else (including any cloud path not explicitly granted) is refused.
+# Production grants remain a user approval recorded in DECISIONS.md.
+EGRESS_DATA_CLASSES = ("prompt", "history", "company_content", "live_result",
+                       "embedding", "telemetry", "debug", "eval")
+EGRESS_PURPOSES = ("answer", "retry", "nlu", "condense", "embed",
+                   "evaluate", "health")
+EGRESS_LOCAL_PROVIDER = "local"
+EGRESS_MARKER_PREFIX = "NXM4MARK"

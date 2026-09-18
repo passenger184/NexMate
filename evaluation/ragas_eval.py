@@ -98,6 +98,10 @@ def run_ragas(rows: list[dict]) -> dict:
     from ragas.llms import LangchainLLMWrapper
     from ragas.metrics import answer_relevancy, context_precision, faithfulness
     from ragas.run_config import RunConfig
+    from rag import egress
+
+    # The judge is a provider path like any other: explicit grant required.
+    egress.check("eval", "ollama", "evaluate")
 
     judge_llm = LangchainLLMWrapper(ChatOllama(
         model=os.environ["GENERATION_MODEL"],

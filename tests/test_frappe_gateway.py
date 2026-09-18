@@ -161,7 +161,9 @@ class FrappeGatewayTest(unittest.TestCase):
             "http://inference.invalid:8000/orchestrate",
             json={"question": "help",
                   "user": "synthetic-user", "site": "synthetic-site",
-                  "mode": "employee", "execution_scope": "chat-only"},
+                  "mode": "employee", "execution_scope": "chat-only",
+                  "scope": {"site": "synthetic-site", "tiers": ["public"],
+                            "roles": [], "derived_by": "frappe-gateway"}},
             headers={"X-NexMate-Key": KEY}, timeout=(5, 300),
             allow_redirects=False, stream=True)
         self.assertFalse(self.client.trust_env)
@@ -197,7 +199,9 @@ class FrappeGatewayTest(unittest.TestCase):
         self.frappe.conf["nexmate_developer_roles"] = ["Engineer"]
         self.body["mode"] = "developer"
         self.api.ask("help")
-        self.frappe.get_roles.assert_called_once_with("synthetic-user")
+        # Persona derivation and scope derivation each read actual roles.
+        self.assertEqual(self.frappe.get_roles.call_args_list,
+                         [mock.call("synthetic-user")] * 2)
         payload = self.client.post.call_args.kwargs["json"]
         self.assertEqual(payload["mode"], "developer")
         self.assertEqual(payload["execution_scope"], "chat-only")
@@ -248,8 +252,33 @@ class FrappeGatewayTest(unittest.TestCase):
             self.assertEqual(self.client.post.call_args.kwargs["json"], {
                 "question": "help", "user": "synthetic-user",
                 "site": "synthetic-site", "mode": "employee", "execution_scope": "chat-only",
+                "scope": {"site": "synthetic-site", "tiers": ["public"],
+                          "roles": [], "derived_by": "frappe-gateway"},
             })
         self.warnings.assert_not_called()
+
+    def test_scope_field_cannot_be_supplied_by_browser(self) -> None:
+        for scope in (None, "", "developer", {"site": "synthetic-site"}, [], {}):
+            self.frappe.form_dict = {
+                "cmd": "erpnext_ai_copilot.api.ask", "question": "help", "scope": scope,
+            }
+            with self.assertRaisesRegex(GatewayError, "^unsupported_gateway_fields$"):
+                self.dispatch_form()
+        self.session.assert_not_called()
+        self.client.post.assert_not_called()
+
+    def test_developer_scope_carries_actual_roles(self) -> None:
+        self.frappe.conf["nexmate_developer_roles"] = ["Engineer"]
+        self.body["mode"] = "developer"
+        self.body["conversation_id"] = None
+        self.api.ask("help")
+        sent = self.client.post.call_args.kwargs["json"]
+        self.assertEqual(sent["mode"], "developer")
+        self.assertEqual(sent["scope"], {
+            "site": "synthetic-site",
+            "tiers": ["public", "site", "restricted"],
+            "roles": ["System Manager", "Engineer"],
+            "derived_by": "frappe-gateway"})
 
     def test_empty_roles_mapping_is_valid_without_warning(self) -> None:
         self.frappe.conf["nexmate_developer_roles"] = []

@@ -27,6 +27,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 import config
+from rag import acl
 
 FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 # Some wiki pages embed screenshots as multi-KB inline base64 data-URIs.
@@ -109,6 +110,7 @@ def _load_documents(limit: int | None = None) -> list[Document]:
             "source_type": config.SOURCE_TYPE_PUBLIC_DOC,
             "updated": str(fields.get("updated", "")),
         }
+        acl.stamp_metadata(metadata, config.SOURCE_TYPE_PUBLIC_DOC)
         if body.strip():
             body = BASE64_DATA_URI_RE.sub("[image]", body)
             docs.append(Document(text=body, metadata=metadata))
@@ -152,19 +154,26 @@ def _chunk(docs: list[Document]) -> list:
     return nodes
 
 
-def _embed_and_store(nodes: list) -> None:
-    """Embed all chunks into a fresh cosine-space Chroma collection."""
+def _embed_and_store(nodes: list, collection_name: str | None = None) -> None:
+    """Embed all chunks into a cosine-space Chroma collection.
+
+    Default target is the live collection (destructive rebuild — kept for
+    the initial bootstrap only). Scoped rebuilds pass a staged collection
+    name instead; publication happens through generations.publish_generation,
+    never by deleting live state here.
+    """
     embed_model = HuggingFaceEmbedding(model_name=config.EMBEDDING_MODEL_NAME)
 
+    target = collection_name or config.COLLECTION_NAME
     client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
     existing = [c.name for c in client.list_collections()]
-    if config.COLLECTION_NAME in existing:
-        client.delete_collection(config.COLLECTION_NAME)
-        print(f"Dropped existing collection '{config.COLLECTION_NAME}'")
+    if not collection_name and target in existing:
+        client.delete_collection(target)
+        print(f"Dropped existing collection '{target}'")
     # hnsw:space MUST be cosine so exp(-distance) similarity thresholds in
     # config.py mean what they claim (chroma default is l2).
     collection = client.get_or_create_collection(
-        config.COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+        target, metadata={"hnsw:space": "cosine"}
     )
     vector_store = ChromaVectorStore(chroma_collection=collection)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
@@ -180,7 +189,7 @@ def _embed_and_store(nodes: list) -> None:
         raise SystemExit(f"Store mismatch: {len(nodes)} chunks built, "
                          f"{count} landed in Chroma")
     print(f"Embedded {count} chunks into {config.CHROMA_DIR} "
-          f"(collection '{config.COLLECTION_NAME}', cosine space)")
+          f"(collection '{target}', cosine space)")
     return index
 
 
@@ -188,17 +197,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--limit", type=int, default=None,
                         help="only ingest the first N cached pages (smoke test)")
+    parser.add_argument("--collection", default=None,
+                        help="staged collection name for scoped rebuilds "
+                             "(default: live collection, destructive)")
     args = parser.parse_args()
 
     documents = _load_documents(limit=args.limit)
     nodes = _chunk(documents)
+    acl.assert_stamped(nodes)
 
     sample = nodes[0]
     print("\nSample chunk for verification:")
     print(f"  metadata: {sample.metadata}")
     print(f"  content[:300]: {sample.get_content()[:300]!r}")
 
-    _embed_and_store(nodes)
+    _embed_and_store(nodes, collection_name=args.collection)
 
 
 if __name__ == "__main__":

@@ -70,6 +70,7 @@ def build_resolution_document(
     message: str,
     context: str,
     diff: str,
+    site: str = "",
 ) -> tuple[str, dict[str, Any]]:
     """One retrievable chunk describing a resolved issue.
 
@@ -97,6 +98,8 @@ def build_resolution_document(
         "source_type": "resolved_issue",
         "updated": "",
     }
+    from rag import acl
+    acl.stamp_metadata(metadata, "resolved_issue", site)
     return text, metadata
 
 
@@ -106,6 +109,7 @@ def index_resolution(
     message: str,
     context: str = "",
     diff: str = "",
+    site: str | None = None,
 ) -> dict[str, Any]:
     """Embed + insert one resolution chunk into the shared collection."""
     # Path safety even here: resolutions reference project-relative paths.
@@ -116,8 +120,11 @@ def index_resolution(
 
     from rag.retriever import get_chroma_collection, _get_embed_model
 
+    if site is None:
+        import os
+        site = os.environ.get("NEXMATE_FRAPPE_SITE", "")
     text, metadata = build_resolution_document(
-        rel_path, commit_hash, message, context, diff
+        rel_path, commit_hash, message, context, diff, site
     )
     embedding = _get_embed_model().get_text_embedding(text)
     collection = get_chroma_collection()

@@ -187,7 +187,8 @@ def condense_followup(
          "content": f"Conversation:\n{convo}\n\nFollow-up: {question}"},
     ]
     try:
-        rewritten = _complete(messages)
+        rewritten = _complete(messages, purpose="condense",
+                              data_classes=("prompt", "history"))
     except Exception:
         return None
     rewritten = _scrub_version_echoes(rewritten.strip().strip('"'))
@@ -211,7 +212,15 @@ def _model_string() -> str:
 
 
 def _complete(messages: list[dict[str, str]],
-              timeout: float = 120, num_retries: int = 1) -> str:
+              timeout: float = 120, num_retries: int = 1, *,
+              purpose: str = "answer",
+              data_classes: tuple = ("prompt",)) -> str:
+    from rag import egress
+    provider = os.environ["GENERATION_PROVIDER"]
+    payload = "\n".join(m.get("content", "") for m in messages
+                        if isinstance(m, dict))
+    for data_class in data_classes:
+        egress.check(data_class, provider, purpose, payload)
     response = completion(
         model=_model_string(),
         messages=messages,
@@ -285,7 +294,8 @@ def generate_answer(
         "role": "user",
         "content": f"Question: {question}\n\nContext passages:\n{passages}",
     })
-    answer = _complete(messages)
+    answer = _complete(messages, purpose="answer",
+                       data_classes=("prompt", "history", "company_content"))
 
     # Deterministic citation-compliance check: small local models skip the
     # inline [n] markers more often than not. Up to two escalated retries —
@@ -307,7 +317,8 @@ def generate_answer(
             {"role": "assistant", "content": answer},
             {"role": "user", "content": escalation},
         ]
-        answer = _complete(messages)
+        answer = _complete(messages, purpose="retry",
+                           data_classes=("prompt", "history", "company_content"))
         decline = (
             answer == "I don't have a confident answer for this in the knowledge base."
         )
@@ -330,7 +341,8 @@ def generate_answer(
                     f"a bare [n] marker pointing at the right passage. "
                     f"Change nothing else.")},
             ]
-            answer = _complete(messages)
+            answer = _complete(messages, purpose="retry",
+                               data_classes=("prompt", "history", "company_content"))
         ungrounded = _ungrounded_identifiers(answer, chunks)
         if ungrounded:
             listing = "; ".join(ungrounded[:8])
@@ -347,5 +359,6 @@ def generate_answer(
                     f"structure and keep the [n] citation markers."
                 )},
             ]
-            answer = _complete(messages)
+            answer = _complete(messages, purpose="retry",
+                               data_classes=("prompt", "history", "company_content"))
     return answer

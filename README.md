@@ -27,7 +27,13 @@ time, FastAPI retrieves top-k chunks via hybrid keyword+vector fusion
 (best per document), gates them by
 similarity score into `high | low | no_match`, and generates an answer via
 litellm using ONLY those chunks — provider/model configured entirely
-through `.env`.
+through `.env`. Retrieval is authorization-scoped: every chunk carries
+`site`/visibility metadata, the gateway envelope carries a Frappe-derived
+scope, and candidates are pre-filtered before fusion (see
+`openspec/specs/acl-aware-retrieval/spec.md`). This coarse-grained layer
+is not full ERPNext permission parity. Index state advances through
+versioned generations (`rag/generations.py`); all provider calls pass a
+deny-by-default egress boundary (`rag/egress.py`).
 
 ## Requirements
 
@@ -213,8 +219,9 @@ validated user/site/mode and exact `execution_scope="chat-only"` are required
 before history or routing. Partial/invalid envelopes and site mismatch
 refuse without legacy downgrade, even in development. Backend dispatch
 blocks code and ERPNext handlers in both personas, including follow-ups and
-degraded routing, and suppresses incidental live version calls. Existing
-cached RAG remains available; this is not ACL-aware retrieval.
+degraded routing, and suppresses incidental live version calls. Retrieval
+is authorization-scoped per the paragraph above; the gateway envelope also
+carries the Frappe-derived scope, validated before history or routing.
 
 ## Standalone preview (explicit local development only)
 
@@ -343,6 +350,9 @@ config.py                     # all tunables (paths, k, thresholds, PROJECT_ROOT
 ingestion/scrape_or_load_docs.py   # sitemap crawl -> data/raw_docs/
 ingestion/chunk_and_embed.py       # heading chunks -> Chroma (cosine)
 rag/retriever.py              # hybrid BM25+vector retrieval, confidence gate
+rag/acl.py                    # coarse-grained scope model + pre-retrieval predicates
+rag/generations.py            # versioned index generations, publish/rollback
+rag/egress.py                 # deny-by-default provider-call boundary
 rag/keyword_index.py          # in-house Okapi BM25 over the Chroma corpus
 rag/generator.py              # THE one litellm call site (provider-agnostic)
 service/main.py               # FastAPI: /ask, /tools/*, /health

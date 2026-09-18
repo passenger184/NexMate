@@ -271,7 +271,8 @@ def _understand_with_llm(
 
     try:
         return _parse(generator._complete(
-            messages, timeout=config.NLU_TIMEOUT_SECONDS, num_retries=0))
+            messages, timeout=config.NLU_TIMEOUT_SECONDS, num_retries=0,
+            purpose="nlu", data_classes=("prompt",)))
     except Exception:
         pass
     try:
@@ -283,7 +284,8 @@ def _understand_with_llm(
                 "no explanations, no code fences."},
         ]
         return _parse(generator._complete(
-            corrective, timeout=config.NLU_TIMEOUT_SECONDS, num_retries=0))
+            corrective, timeout=config.NLU_TIMEOUT_SECONDS, num_retries=0,
+            purpose="nlu", data_classes=("prompt",)))
     except Exception:
         return None
 
@@ -331,7 +333,7 @@ def _respond_conversational(subtype: str | None, question: str,
             {"role": "system", "content": _CONVERSATIONAL_PROMPT.format(
                 message=question[:200], subtype=subtype or "greeting")},
             {"role": "user", "content": question[:200]},
-        ]).strip()
+        ], purpose="answer", data_classes=("prompt",)).strip()
     except Exception:
         return fallback
     return text[:300] if text else fallback
@@ -561,7 +563,8 @@ def _classify_with_llm(question: str,
         return route
 
     try:
-        return _parse(generator._complete(messages)), "classifier"
+        return _parse(generator._complete(messages, purpose="nlu",
+                                          data_classes=("prompt",))), "classifier"
     except Exception:
         pass
     try:
@@ -572,7 +575,8 @@ def _classify_with_llm(question: str,
                 'Output ONLY the raw JSON object, e.g. {"route": "rag"}. '
                 "No prose, no explanations, no code fences."},
         ]
-        return _parse(generator._complete(corrective)), "classifier"
+        return _parse(generator._complete(corrective, purpose="nlu",
+                                          data_classes=("prompt",))), "classifier"
     except Exception:
         return "rag", "default"
 
@@ -654,7 +658,8 @@ def _extract_erpnext_request(question: str) -> dict[str, Any]:
         return parsed
 
     try:
-        return _validate(_parse(generator._complete(messages)))
+        return _validate(_parse(generator._complete(
+            messages, purpose="nlu", data_classes=("prompt",))))
     except (ValueError, json.JSONDecodeError):
         pass
     # ONE corrective escalation — small models sometimes narrate first.
@@ -665,7 +670,8 @@ def _extract_erpnext_request(question: str) -> dict[str, Any]:
             "Output ONLY the raw JSON object matching the schema. No "
             "prose, no explanations, no code fences."},
     ]
-    return _validate(_parse(generator._complete(messages)))
+    return _validate(_parse(generator._complete(
+        messages, purpose="nlu", data_classes=("prompt",))))
 
 
 def run_erpnext_branch(question: str,
@@ -712,7 +718,8 @@ def run_erpnext_branch(question: str,
         {"role": "user",
          "content": f"Question: {question}\n\nPayload:\n[1] {passages}"},
     ]
-    answer = generator._complete(messages)
+    answer = generator._complete(messages, purpose="answer",
+                                   data_classes=("prompt", "live_result"))
     ungrounded = generator._ungrounded_identifiers(answer, [
         {"text": passages}])
     if ungrounded:
@@ -724,7 +731,8 @@ def run_erpnext_branch(question: str,
                 f"{listing}. Rewrite using only identifiers visible in the "
                 f"payload, keeping [1]-style citations.")},
         ]
-        answer = generator._complete(messages)
+        answer = generator._complete(messages, purpose="retry",
+                                       data_classes=("prompt", "live_result"))
 
     sources = [{
         "title": f"live ERPNext: {doctype}",
@@ -749,6 +757,7 @@ def handle_question(
     mode: str = "developer",
     *,
     chat_only: bool = False,
+    scope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Route + execute + generate. Mirrors /ask's safety semantics.
 
@@ -768,7 +777,8 @@ def handle_question(
     the user.
     """
     tag: dict[str, Any] = {}
-    out = _handle_question_inner(question, conversation_id, history, mode, tag, chat_only)
+    out = _handle_question_inner(question, conversation_id, history, mode, tag, chat_only,
+                                 scope=scope)
     out = dict(out)
     out.setdefault("nlu_kind", tag.get("nlu_kind"))
     out.setdefault("nlu_confidence", tag.get("nlu_confidence"))
@@ -784,6 +794,7 @@ def _handle_question_inner(
     mode: str,
     tag: dict[str, Any],
     chat_only: bool = False,
+    scope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Body of handle_question; records its NLU verdict into tag.
 
@@ -945,7 +956,7 @@ def _handle_question_inner(
     lowered = question.lower()
     scoped = (mode == "developer") and any(
         h in lowered for h in config.PROJECT_SCOPE_HINTS)
-    chunks = retriever.retrieve(question, include_company=scoped)
+    chunks = retriever.retrieve(question, include_company=scoped, scope=scope)
     confidence = retriever.classify_confidence(chunks, question)
     if confidence != "high":
         sources = [] if confidence == "no_match" else [

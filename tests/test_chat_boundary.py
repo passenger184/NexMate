@@ -107,6 +107,9 @@ class ChatBoundaryTest(unittest.TestCase):
             "Explain this project", [CHUNK], CONVERSATION["turns"],
             extra_system="", persona="employee")
         self.assertEqual(response.json()["conversation_id"], CONVERSATION["id"])
+        source = response.json()["sources"][0]
+        for key in ("site", "visibility", "generation"):
+            self.assertIn(key, source)
         self.assertFalse(hasattr(main, "session_store"))
 
     def test_legacy_session_id_refused_explicitly(self) -> None:
@@ -261,7 +264,8 @@ class ChatBoundaryTest(unittest.TestCase):
                     mock.patch.object(orchestrator, "decide_route", return_value=("rag", "classifier")):
                 response = self.post(dict(ENVELOPE, question="Explain this project", mode=mode))
             self.assertEqual(response.status_code, 200, response.text)
-            self.retrieve.assert_called_with("Explain this project", include_company=mode == "developer")
+            self.retrieve.assert_called_with("Explain this project", include_company=mode == "developer",
+                                               scope=None)
             self.generate.assert_called_with("Explain this project", [CHUNK], [],
                                              extra_system="", persona=mode)
             self.assertEqual(response.json()["sources"][0]["url_or_path"], "manual")
@@ -323,12 +327,61 @@ class ChatBoundaryTest(unittest.TestCase):
         self.retrieve.assert_not_called()
         self.generate.assert_not_called()
 
+    def test_authz_scope_accepted_and_threaded(self) -> None:
+        scope = {"site": ENVELOPE["site"], "tiers": ["public"],
+                 "roles": [], "derived_by": "frappe-gateway"}
+        with mock.patch.object(orchestrator, "handle_question",
+                               wraps=orchestrator.handle_question) as handle:
+            response = self.post(dict(ENVELOPE, scope=scope))
+            self.assertEqual(response.status_code, 200, response.text)
+            handle.assert_called_once_with(
+                "help", None, [], mode="employee", chat_only=True, scope=scope)
+            self.assertEqual(response.json()["route"], "capability")
+
+    def test_authz_scope_none_is_stateless(self) -> None:
+        response = self.post(dict(ENVELOPE, scope=None))
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def test_invalid_authz_scope_refused(self) -> None:
+        good = {"site": ENVELOPE["site"], "tiers": ["public"],
+                "roles": [], "derived_by": "frappe-gateway"}
+        cases = [
+            dict(good, site="wrong-site"),
+            dict(good, site=""),
+            dict(good, tiers=[]),
+            dict(good, tiers=["public", "secret"]),
+            dict(good, tiers="public"),
+            dict(good, roles="Engineer"),
+            dict(good, roles=["ok", 42]),
+            dict(good, derived_by="browser"),
+            dict(good, derived_by="legacy-direct"),
+            dict(good, extra="field"),
+            {"site": ENVELOPE["site"]},
+        ]
+        for scope in cases:
+            with self.subTest(scope=str(scope)[:60]):
+                response = self.post(dict(ENVELOPE, scope=scope))
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(response.json(),
+                                 {"detail": "invalid_authz_scope"})
+                self.assertNotIn(KEY, response.text)
+        # Non-mapping scopes fail even earlier, at the schema.
+        for scope in ("not-a-dict", ["scope"]):
+            response = self.post(dict(ENVELOPE, scope=scope))
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.json(),
+                             {"detail": "invalid_orchestrate_request"})
+        self.retrieve.assert_not_called()
+        self.complete.assert_not_called()
+        self.logs.assert_not_called()
+
     def test_direct_stateless_mode_and_dispatch_remain_separate(self) -> None:
         with mock.patch.object(orchestrator, "handle_question", wraps=orchestrator.handle_question) as handle, \
                 mock.patch.object(orchestrator, "get_instance_versions", return_value={"status": "legacy"}) as versions:
             response = self.post({"question": "help", "mode": "developer"})
             self.assertEqual(response.status_code, 200)
-            handle.assert_called_once_with("help", None, [], mode="developer", chat_only=False)
+            handle.assert_called_once_with("help", None, [], mode="developer", chat_only=False,
+                                               scope=None)
             versions.assert_called_once_with()
         self.assertIn("Live ERPNext data lookups", response.json()["answer"])
 

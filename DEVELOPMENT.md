@@ -114,18 +114,21 @@ other prefix matches are not exempt.
 
 Desk uses only authenticated Frappe `erpnext_ai_copilot.api.ask`, relying on
 standard non-guest authentication and session CSRF checks. The server
-constructs user/site/mode and exact `execution_scope="chat-only"`; inference
-requires service authentication and validates the complete envelope and
-fixed site before history/routing/retrieval. Partial or invalid envelopes
-cannot downgrade to legacy mode, even under development exemption.
+constructs user/site/mode, the retrieval authorization scope, and exact
+`execution_scope="chat-only"`; inference requires service authentication
+and validates the complete envelope and fixed site before history/routing/
+retrieval. Partial or invalid envelopes cannot downgrade to legacy mode,
+even under development exemption.
 
 Backend request-local `chat_only` enforcement denies code and ERPNext
 handlers before entry in both personas, including natural-language,
 troubleshooting, rewritten follow-ups and degraded routing. Incidental
 ERPNext version lookups are suppressed; versions report unavailable.
-Existing conversational/cited cached RAG continues, not live file tools or
-ACL-aware retrieval. There are no gateway tool/proposal/approval/reset
-operations. The disabled Desk mode selector cannot override server persona.
+Existing conversational/cited cached RAG continues, not live file tools.
+Retrieval is authorization-scoped (site/visibility/roles pre-filtered
+before fusion), not full ERPNext permission parity. There are no gateway
+tool/proposal/approval/reset operations. The disabled Desk mode selector
+cannot override server persona.
 
 Desk slash commands and stale approval/rejection cards are unavailable.
 Desk start-fresh resets the owned server-side thread (local clear only when
@@ -265,6 +268,49 @@ The existing Node harness and bundle syntax check are:
 node frappe_app/public/js/copilot.bundle.test.js
 node --check frappe_app/public/js/copilot.bundle.js
 ```
+
+## Index generations and egress grants (operator runbook)
+
+Retrieval serves one active index generation (`data/generations/`, pointer
+`active.json`); the pre-generation store is `gen-0-legacy`. The steps below
+are operator actions from the repo root with the project `.venv` (never from
+Bench containers):
+
+```bash
+# 1. Backfill ACL metadata onto the live collection (vectors untouched),
+#    keeping a JSONL metadata backup for rollback:
+.venv/bin/python -c "
+from rag import generations
+generations.backfill_acl_metadata('erpnext_docs', 'frontend',
+    backup_path='/tmp/gen1-metadata-backup.jsonl')"
+
+# 2. Seed a staged copy, write its manifest, verify, and publish:
+.venv/bin/python -c "
+from rag import generations
+from rag.retriever import current_fingerprint
+fp = current_fingerprint()
+generations.seed_staged_from('erpnext_docs--gen-2', None)  # or drop corpora
+generations.write_manifest('gen-2', parent='gen-1-m4', sources={...},
+    fingerprint=fp, acl_schema_version=1,
+    counts=generations.count_by_source(generations._client().get_collection('erpnext_docs--gen-2')))
+generations.publish_generation('gen-2',
+    lambda: generations.verify_generation('gen-2', fp))"
+```
+
+Scoped rebuilds drop corpora in `seed_staged_from`, then run the matching
+pipeline with `--collection <staged>` (`ingestion/chunk_and_embed.py`,
+`ingestion/ingest_project.py --site <site>`). Rollback reactivates the
+parent generation (`rollback_generation()`); a generation retired by
+`revoke_generation()` refuses both rollback-to and republication. The
+running service picks up pointer changes on the next retrieval without a
+restart; verify with per-corpus counts plus the fixture suites in
+`tests/test_acl_retrieval.py`.
+
+Egress grants default to the configured generation provider's standard
+purposes plus local embeddings/eval; anything else is denied until
+explicitly granted. Production cloud grants remain a `DECISIONS.md`
+approval — never infer them from configuration, and never authorize a paid
+call by testing (the marker harness uses mocked transports only).
 
 For the boundary's offline verification, dotenv loading must be disabled
 (`PYTHON_DOTENV_DISABLED=1`) and model/network integrations kept mocked;

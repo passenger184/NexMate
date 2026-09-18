@@ -82,6 +82,40 @@ def validate_conversation_block(conv: object, user: str) -> list[dict[str, str]]
     return [{"role": turn["role"], "content": turn["content"]} for turn in turns]
 
 
+SCOPE_KEYS = frozenset({"site", "tiers", "roles", "derived_by"})
+SCOPE_TIERS = ("public", "site", "restricted")
+SCOPE_DERIVED_BY_MARKER = "frappe-gateway"
+
+
+def validate_authz_scope(scope: object, user: str, site: str) -> dict:
+    """Consistency validation for a Frappe-derived authorization scope.
+
+    Frappe is authoritative for the scope; this check NEVER grants
+    authorization itself. It confirms structure (frozen fields), the
+    Frappe-derivation marker, and consistency with the already-validated
+    envelope user and trusted site. Anything else fails loud.
+    Returns the scope unchanged.
+    """
+    if (not isinstance(scope, dict) or set(scope) != SCOPE_KEYS
+            or not valid_identity(scope.get("site"))
+            or scope.get("site") != site
+            or scope.get("site") != config.NEXMATE_FRAPPE_SITE):
+        raise HTTPException(status_code=422, detail="invalid_authz_scope")
+    tiers = scope.get("tiers")
+    if (not isinstance(tiers, list) or not tiers
+            or any(t not in SCOPE_TIERS for t in tiers)):
+        raise HTTPException(status_code=422, detail="invalid_authz_scope")
+    roles = scope.get("roles")
+    if (not isinstance(roles, list)
+            or not all(valid_identity(r) for r in roles)):
+        raise HTTPException(status_code=422, detail="invalid_authz_scope")
+    if scope.get("derived_by") != SCOPE_DERIVED_BY_MARKER:
+        raise HTTPException(status_code=422, detail="invalid_authz_scope")
+    if user == "Guest":
+        raise HTTPException(status_code=422, detail="invalid_authz_scope")
+    return scope
+
+
 class ServiceAuthMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -147,4 +181,6 @@ def validate_gateway_envelope(payload: dict, supplied: set[str],
         raise HTTPException(status_code=403, detail="gateway_site_mismatch")
     if "conversation" in supplied and payload.get("conversation") is not None:
         validate_conversation_block(payload["conversation"], payload["user"])
+    if "scope" in supplied and payload.get("scope") is not None:
+        validate_authz_scope(payload["scope"], payload["user"], payload["site"])
     return True

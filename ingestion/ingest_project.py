@@ -40,6 +40,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 import config
+from rag import acl
 
 SOURCE_TYPES = ("our_code", "company_doc")
 
@@ -164,15 +165,15 @@ def split_python(text: str) -> list[tuple[str, str]]:
     return segments
 
 
-def _load_markdown(path: Path) -> list[Document]:
+def _load_markdown(path: Path, site: str) -> list[Document]:
     raw = path.read_text(encoding="utf-8")
     rel = path.relative_to(config.PROJECT_ROOT).as_posix()
-    base_meta = {
+    base_meta = acl.stamp_metadata({
         "title": rel,
         "url_or_path": rel,
         "source_type": "company_doc",
         "updated": "",
-    }
+    }, "company_doc", site)
     nodes = MarkdownNodeParser().get_nodes_from_documents(
         [Document(text=raw, metadata=dict(base_meta))]
     )
@@ -195,8 +196,8 @@ def _load_markdown(path: Path) -> list[Document]:
             if len(d.get_content().strip()) >= config.MIN_CHUNK_CHARS]
 
 
-def load_project_documents(dry_run: bool = False
-                           ) -> tuple[list[Document], dict[str, int]]:
+def load_project_documents(dry_run: bool = False, site: str = ""
+                            ) -> tuple[list[Document], dict[str, int]]:
     """Build Documents from this repo; returns (docs, per-type counts)."""
     docs: list[Document] = []
     counts = {"our_code": 0, "company_doc": 0}
@@ -213,18 +214,18 @@ def load_project_documents(dry_run: bool = False
             new = [
                 Document(
                     text=piece,
-                    metadata={
+                    metadata=acl.stamp_metadata({
                         "title": rel,
                         "section": symbol,
                         "url_or_path": rel,
                         "source_type": "our_code",
                         "updated": "",
-                    },
+                    }, "our_code", site),
                 )
                 for symbol, piece in chunks
             ]
         elif path.suffix == ".md":
-            new = _load_markdown(path)
+            new = _load_markdown(path, site)
         else:
             continue
         docs.extend(new)
@@ -249,10 +250,19 @@ def load_project_documents(dry_run: bool = False
     return non_empty, counts
 
 
-def sync_to_chroma(docs: list[Document]) -> int:
-    """Delete stale project chunks, then embed+insert the fresh corpus."""
+def sync_to_chroma(docs: list[Document], site: str = "",
+                   collection_name: str | None = None) -> int:
+    """Delete stale project chunks, then embed+insert the fresh corpus.
+
+    Targets the live collection by default; scoped rebuilds pass the staged
+    collection name (which was seeded from the parent generation first).
+    """
+    for doc in docs:
+        acl.stamp_metadata(doc.metadata, doc.metadata.get("source_type", ""), site)
+    acl.assert_stamped(docs)
     client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-    collection = client.get_collection(config.COLLECTION_NAME)
+    target = collection_name or config.COLLECTION_NAME
+    collection = client.get_collection(target)
     before_public = collection.count()
     existing = collection.get(where={"source_type": {"$in": list(SOURCE_TYPES)}})
     stale_ids = existing["ids"]
@@ -280,13 +290,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true",
                         help="report what would be ingested; write nothing")
+    parser.add_argument("--site", default=None,
+                        help="Frappe site owning company chunks "
+                             "(defaults to $NEXMATE_FRAPPE_SITE; required "
+                             "unless --dry-run, else stamped unreachable)")
+    parser.add_argument("--collection", default=None,
+                        help="staged collection name for scoped rebuilds "
+                             "(default: live collection)")
     args = parser.parse_args()
 
-    docs, _ = load_project_documents(dry_run=args.dry_run)
+    import os
+    site = args.site or os.environ.get("NEXMATE_FRAPPE_SITE", "")
+    docs, _ = load_project_documents(dry_run=args.dry_run, site=site)
     if not docs:
         raise SystemExit("No project documents found — nothing to ingest")
     if not args.dry_run:
-        sync_to_chroma(docs)
+        if not site:
+            raise SystemExit(
+                "Refusing company ingestion without a site: pass --site or "
+                "set NEXMATE_FRAPPE_SITE (unstamped company chunks would be "
+                "unreachable by every scope).")
+        sync_to_chroma(docs, site, collection_name=args.collection)
 
 
 if __name__ == "__main__":

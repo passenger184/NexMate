@@ -143,16 +143,20 @@ class KeywordIndex:
             (i, self._bm25_score(i, query_terms))
             for i in range(len(self.ids))
         ]
-        hits = [
-            {
+        hits = []
+        for i, score in scored:
+            if score <= 0.0:
+                continue
+            meta = self.metadatas[i] or {}
+            allowed = meta.get("allowed_roles")
+            hits.append({
                 "id": self.ids[i],
                 "bm25_score": round(score, 4),
-                **{k: str(self.metadatas[i].get(k, ""))
-                   for k in ("title", "section", "url_or_path", "source_type")},
-            }
-            for i, score in scored
-            if score > 0.0
-        ]
+                **{k: str(meta.get(k, ""))
+                   for k in ("title", "section", "url_or_path", "source_type",
+                             "site", "visibility")},
+                "allowed_roles": list(allowed) if isinstance(allowed, list) else [],
+            })
         hits.sort(key=lambda h: h["bm25_score"], reverse=True)
         return hits[:top_n]
 
@@ -207,27 +211,51 @@ class KeywordIndex:
 
 
 _keyword_index: KeywordIndex | None = None
+_keyword_generation: str | None = "_unset_"
 
 
-def get_keyword_index() -> KeywordIndex:
-    """Lazily build the BM25 index from the persisted Chroma collection."""
-    global _keyword_index
-    if _keyword_index is None:
-        client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-        try:
-            collection = client.get_collection(config.COLLECTION_NAME)
-        except Exception as exc:  # chroma raises bare ValueError subclasses
-            raise RuntimeError(
-                f"Collection '{config.COLLECTION_NAME}' not found in "
-                f"{config.CHROMA_DIR}. Run `python -m ingestion.chunk_and_embed` first."
-            ) from exc
+def _collection_for_generation(generation: str | None):
+    """Collection backing a generation (None/legacy = historic store)."""
+    import config as _config
+
+    name = _config.COLLECTION_NAME if generation in (None, "gen-0-legacy") \
+        else f"{_config.COLLECTION_NAME}--{generation}"
+    client = chromadb.PersistentClient(path=str(_config.CHROMA_DIR))
+    try:
+        return client.get_collection(name), name
+    except Exception as exc:  # chroma raises bare ValueError subclasses
+        raise RuntimeError(
+            f"Collection '{name}' not found in "
+            f"{_config.CHROMA_DIR}. Run `python -m ingestion.chunk_and_embed` first."
+        ) from exc
+
+
+def get_keyword_index(generation: str | None = None) -> KeywordIndex:
+    """Lazily build the BM25 index from the ACTIVE generation's snapshot.
+
+    The snapshot is keyed by generation id: publishing a new generation
+    (or rolling back) rebuilds the lexical state from the same staged
+    snapshot as the vectors, so lexical reads can never drift from what
+    vector search serves. Revocation drops the old snapshot with it.
+    """
+    global _keyword_index, _keyword_generation
+    if _keyword_index is None or _keyword_generation != generation:
+        collection, name = _collection_for_generation(generation)
         dumped = collection.get(include=["documents", "metadatas"])
         docs = dumped.get("documents") or []
         metas = dumped.get("metadatas") or []
         if not docs:
             raise RuntimeError(
-                f"Collection '{config.COLLECTION_NAME}' is empty; "
+                f"Collection '{name}' is empty; "
                 "cannot build keyword index"
             )
         _keyword_index = KeywordIndex(dumped["ids"], docs, metas)
+        _keyword_generation = generation
     return _keyword_index
+
+
+def invalidate_keyword_index() -> None:
+    """Drop the lexical snapshot (revocation/rollback support)."""
+    global _keyword_index, _keyword_generation
+    _keyword_index = None
+    _keyword_generation = "_unset_"

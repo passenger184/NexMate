@@ -27,6 +27,13 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 import config
+from rag import acl, egress
+from rag.generations import (
+    LEGACY_GENERATION_ID,
+    active_generation_id,
+    fingerprint_compatible,
+    read_manifest,
+)
 from rag.keyword_index import get_keyword_index, tokenize as tokenize_for_gate
 
 # Module-level singletons — the embedding model (~130MB) and indexes are
@@ -34,6 +41,8 @@ from rag.keyword_index import get_keyword_index, tokenize as tokenize_for_gate
 _embed_model: HuggingFaceEmbedding | None = None
 _index: VectorStoreIndex | None = None
 _chroma_collection = None
+_chroma_generation: str | None = "_unset_"
+_keyword_generation: str | None = "_unset_"
 
 # resolved_issue chunks (Phase 4) ride in the boosted company pool so past
 # fixes surface alongside current code and docs.
@@ -43,23 +52,73 @@ COMPANY_SOURCE_TYPES = ("our_code", "company_doc", "resolved_issue")
 def _get_embed_model() -> HuggingFaceEmbedding:
     global _embed_model
     if _embed_model is None:
+        # Local embeddings never leave the box, but the grant is still
+        # checked so the boundary (and its tests) cover every provider path.
+        egress.check("embedding", config.EGRESS_LOCAL_PROVIDER, "embed")
         _embed_model = HuggingFaceEmbedding(model_name=config.EMBEDDING_MODEL_NAME)
     return _embed_model
 
 
+def current_fingerprint() -> dict:
+    """Fingerprint of the configured embedding setup (revision best-effort)."""
+    model = _get_embed_model()
+    try:
+        dimensions = int(model.get_sentence_embedding_dimension())
+    except Exception:
+        try:
+            dimensions = len(model.get_text_embedding("fingerprint probe"))
+        except Exception:
+            dimensions = 0
+    return {"model": config.EMBEDDING_MODEL_NAME, "revision": "unknown",
+            "dimensions": dimensions, "metric": "cosine"}
+
+
+def _resolve_generation() -> str:
+    """Active generation id, or the legacy marker for the pre-generation store."""
+    try:
+        return active_generation_id() or LEGACY_GENERATION_ID
+    except RuntimeError:
+        return LEGACY_GENERATION_ID
+
+
 def get_chroma_collection():
-    """The persisted collection, shared by vector pools and keyword index."""
-    global _chroma_collection
-    if _chroma_collection is None:
+    """The persisted collection for the ACTIVE generation.
+
+    Managed generations resolve to their own collection; the legacy store
+    keeps serving under its historic name until the first controlled
+    rebuild. A fingerprint mismatch on a managed generation refuses loudly
+    instead of serving silently incompatible vectors.
+    """
+    global _chroma_collection, _chroma_generation
+    generation = _resolve_generation()
+    if _chroma_collection is None or _chroma_generation != generation:
+        if generation == LEGACY_GENERATION_ID:
+            name = config.COLLECTION_NAME
+        else:
+            manifest = read_manifest(generation)
+            stored = manifest.get("embedding_fingerprint", {})
+            if not fingerprint_compatible(stored, current_fingerprint()):
+                raise RuntimeError(
+                    f"Index generation {generation!r} is incompatible with "
+                    f"the configured embedding model; controlled rebuild required."
+                )
+            name = f"{config.COLLECTION_NAME}--{generation}"
         client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
         try:
-            _chroma_collection = client.get_collection(config.COLLECTION_NAME)
+            _chroma_collection = client.get_collection(name)
         except Exception as exc:  # chroma raises bare ValueError subclasses
             raise RuntimeError(
-                f"Collection '{config.COLLECTION_NAME}' not found in "
+                f"Collection '{name}' not found in "
                 f"{config.CHROMA_DIR}. Run `python -m ingestion.chunk_and_embed` first."
             ) from exc
+        _chroma_generation = generation
     return _chroma_collection
+
+
+def active_generation() -> str:
+    """Generation id served by this process (for provenance + caches)."""
+    return _chroma_generation if _chroma_generation not in (None, "_unset_") \
+        else _resolve_generation()
 
 
 def get_index() -> VectorStoreIndex:
@@ -99,6 +158,7 @@ def _vector_pool(question_embedding: list[float], where: dict,
     dists = res.get("distances", [[]])[0]
     for cid, text, meta, dist in zip(ids, docs, metas, dists):
         meta = meta or {}
+        allowed = meta.get("allowed_roles")
         out.append({
             "id": cid,
             "text": text or "",
@@ -108,6 +168,10 @@ def _vector_pool(question_embedding: list[float], where: dict,
             "section": str(meta.get("section", "")),
             "url_or_path": str(meta.get("url_or_path", "")),
             "source_type": str(meta.get("source_type", "")),
+            "site": str(meta.get("site", "")),
+            "visibility": str(meta.get("visibility", "")),
+            "allowed_roles": list(allowed) if isinstance(allowed, list) else [],
+            "generation": str(meta.get("generation", "")),
         })
     return out
 
@@ -126,7 +190,8 @@ def _cosine(query_vec: list[float], text: str) -> float:
 
 
 def retrieve(question: str, k: int | None = None,
-             include_company: bool = True) -> list[dict[str, Any]]:
+             include_company: bool = True,
+             scope: dict | None = None) -> list[dict[str, Any]]:
     """Return top-k chunks fused across three signals.
 
     Vector similarity is retrieved as TWO pools — public docs and project
@@ -136,24 +201,41 @@ def retrieve(question: str, k: int | None = None,
     three fuse via Reciprocal Rank Fusion before best-chunk-per-document
     dedupe.
 
+    Authorization scope (M4): `scope` carries site/tiers/roles/derived_by
+    (see rag.acl). Scope predicates apply INSIDE both vector-pool queries
+    and to BM25 candidates BEFORE fusion — denied content never enters
+    candidate lists. `scope=None` (legacy direct callers) degrades to
+    public-tier-only retrieval, never to unscopable company access.
+    Chunks missing valid ACL metadata never match (fail closed).
+
     include_company=False restricts everything (both vector pools AND the
     BM25 list) to public framework docs — used by the orchestrator for
     generic how-to questions, where this repo's own meta-docs (which QUOTE
     eval questions verbatim) would otherwise out-rank the real answer
-    pages through pure keyword coincidence.
+    pages through pure keyword coincidence. Persona restrictions are
+    unchanged by M4 on top of scope enforcement.
 
     Each result: {text, score, bm25_score, title, section, url_or_path,
-    source_type}, best fused rank first.
+    source_type, site, visibility, allowed_roles, generation}, best fused
+    rank first.
     """
+    if scope is None:
+        scope = acl.legacy_public_scope()
+    if not acl.valid_scope(scope):
+        raise ValueError("retrieve() requires a valid authorization scope")
+    scope_filter = acl.scope_where(scope)
+    generation = active_generation()
     top_k = k or config.RETRIEVAL_K
     pool = top_k * config.CANDIDATE_MULTIPLIER
 
     query_vec = _get_embed_model().get_query_embedding(question)
     public_pool = _vector_pool(
-        query_vec, {"source_type": "public_doc"}, pool
+        query_vec, {"$and": [scope_filter, {"source_type": "public_doc"}]}, pool
     )
     company_pool = _vector_pool(
-        query_vec, {"source_type": {"$in": list(COMPANY_SOURCE_TYPES)}}, pool
+        query_vec, {"$and": [scope_filter,
+                             {"source_type": {"$in": list(COMPANY_SOURCE_TYPES)}}]},
+        pool,
     ) if include_company else []
 
     candidates: dict[str, dict[str, Any]] = {}
@@ -165,14 +247,17 @@ def retrieve(question: str, k: int | None = None,
                                  ("company", company_pool)):
         for row in pool_rows:
             cid = row.pop("id")
+            row["generation"] = generation
             vector_orders[pool_name].append(cid)
             if cid in candidates:
                 continue
             candidates[cid] = row
 
-    keyword_hits = get_keyword_index().search(question, pool)
+    keyword_hits = get_keyword_index(generation).search(question, pool)
     keyword_order: list[str] = []
     for hit in keyword_hits:
+        if not acl.match_metadata(hit, scope):
+            continue
         if not include_company and hit.get("source_type") != "public_doc":
             continue
         keyword_order.append(hit["id"])
@@ -189,6 +274,10 @@ def retrieve(question: str, k: int | None = None,
                 "section": hit["section"],
                 "url_or_path": hit["url_or_path"],
                 "source_type": hit["source_type"],
+                "site": hit.get("site", ""),
+                "visibility": hit.get("visibility", ""),
+                "allowed_roles": hit.get("allowed_roles", []),
+                "generation": generation,
                 "_needs_text": True,
             }
 

@@ -945,3 +945,27 @@ container install, `host.docker.internal:8000`, test key, roles
 - Recorded in CURRENT.md (new section above); archived change/specs
   untouched; no commit/push. Full test-by-test table in the Phase 5
   report message.
+
+## [2026-09-18] M4 acl-aware-knowledge-retrieval — implementation session
+
+- Implemented coarse-grained retrieval ACL end to end: `rag/acl.py`
+  (scope model, Chroma `$contains` predicates — found `$in` does NOT match
+  array elements, pinned by test; fail-closed unstamped exclusion),
+  `rag/generations.py` (manifests, atomic pointer swap, revocation ledger,
+  fingerprint gate), `rag/egress.py` (deny-by-default choke point, marker
+  harness, secret scrub), envelope scope in gateway + Frappe derivation,
+  ingestion stamping with `--site`/`--collection`, staged-collection
+  support in both pipelines.
+- Live migration on the serving corpus: backfilled 7,410 public + 325
+  project chunks (no re-embed, backup kept), seeded + verified + published
+  `gen-1-m4` (384-dim fingerprint; fixed a dims-0 probing bug first),
+  full deletion→rollback→revocation-refusal cycle, role grant/revoke
+  immediacy, 15/15 held-out sanity, G3 regression re-passed. Test data and
+  scratch generations cleaned; revocations file removed after the test.
+- Notable live finding: Frappe `get_roles("Administrator")` returns ALL
+  Role rows by framework rule, and a deleted Role left a stale entry in
+  Frappe's own `roles` Redis hash until explicit `hdel` — revocation
+  immediacy inherits Frappe cache invalidation; recorded as caveat.
+  Generation LLM unreachable here, so chat-path retrieval stays
+  unit/operator-probe covered. FastAPI stopped after the run; Bench left
+  running. Suites: 256 Python OK, 67 Node PASS. No commit/push.

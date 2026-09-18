@@ -107,8 +107,9 @@ class EmployeeModeTest(unittest.TestCase):
     def test_employee_rag_uses_public_docs_only(self) -> None:
         captured = {}
 
-        def fake_retrieve(question, k=None, include_company=True):
+        def fake_retrieve(question, k=None, include_company=True, scope=None):
             captured["include_company"] = include_company
+            captured["scope"] = scope
             return []
 
         with mock.patch.object(orchestrator, "_understand_with_llm",
@@ -120,6 +121,7 @@ class EmployeeModeTest(unittest.TestCase):
             orchestrator.handle_question("How do I make an invoice?",
                                          mode="employee")
         self.assertFalse(captured["include_company"])
+        self.assertIsNone(captured["scope"])
 
     def test_employee_rag_generation_uses_employee_persona(self) -> None:
         chunk = {"title": "sales-invoice", "section": "Creating",

@@ -79,6 +79,9 @@ class Source(BaseModel):
     title: str
     section: str
     url_or_path: str
+    site: str | None = None
+    visibility: str | None = None
+    generation: str | None = None
 
 
 class AskResponse(BaseModel):
@@ -210,6 +213,10 @@ class OrchestrateRequest(BaseModel):
     # retired: extra="forbid" below refuses it explicitly as
     # invalid_orchestrate_request instead of silently dropping history.
     conversation: dict[str, Any] | None = None
+    # Frappe-derived authorization scope for retrieval (site, tiers, roles,
+    # derivation marker). Absent means legacy direct: public-tier-only
+    # retrieval, never unscopable company access.
+    scope: dict[str, Any] | None = None
     mode: Literal["developer", "employee"] = "developer"
 
     @field_validator("question")
@@ -227,6 +234,9 @@ class OrchestrateSource(BaseModel):
     source_type: str | None = None
     line_start: int | None = None
     line_end: int | None = None
+    site: str | None = None
+    visibility: str | None = None
+    generation: str | None = None
 
 
 class OrchestrateResponse(BaseModel):
@@ -326,6 +336,9 @@ def _dedupe_sources(chunks: list[dict[str, Any]]) -> list[Source]:
             sources.append(Source(
                 title=c["title"], section=c["section"],
                 url_or_path=c["url_or_path"],
+                site=c.get("site") or None,
+                visibility=c.get("visibility") or None,
+                generation=c.get("generation") or None,
             ))
     return sources
 
@@ -558,7 +571,8 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
             search_question = candidate
 
     result = orchestrator.handle_question(
-        search_question, conversation_id, history, mode=req.mode, chat_only=chat_only)
+        search_question, conversation_id, history, mode=req.mode,
+        chat_only=chat_only, scope=req.scope)
 
     # Exchanges so far (prior pairs) plus this one; None when stateless.
     turn_count: int | None = None
@@ -578,6 +592,9 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
             "source_type": s.get("source_type"),
             "line_start": s.get("line_start"),
             "line_end": s.get("line_end"),
+            "site": s.get("site") or None,
+            "visibility": s.get("visibility") or None,
+            "generation": s.get("generation") or None,
         }))
 
     route = result["route"]

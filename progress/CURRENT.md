@@ -1,8 +1,36 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-18 — `frappe-owned-conversation-state` (G3) implemented, live-verified, spec-synced, archived, committed as `ae9fcc8` and pushed to `origin/main`.
+**Last updated:** 2026-09-18 — `acl-aware-knowledge-retrieval` (M4) implemented (25/25 tasks) and live-verified; uncommitted, unarchived.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
-**Current task:** G3 closed. Active pointer per user direction: M4 (ACL-aware knowledge retrieval & grounded context assembly) — requires a separately approved OpenSpec change; not started, nothing authorized.
+**Current task:** M4 awaiting user review; archive (`/opsx-archive`) only on approval. No commit/push performed.
+
+## 2026-09-18 acl-aware-knowledge-retrieval — implementation and live evidence
+
+Change `openspec/changes/acl-aware-knowledge-retrieval/` (M4, 25/25 tasks):
+coarse-grained retrieval ACL (`rag/acl.py`: site/visibility/allowed_roles,
+public-global, fail-closed) enforced pre-retrieval on vector pools and BM25
+candidates; Frappe-derived envelope scope (`api.py`, persona-preserving);
+versioned index generations (`rag/generations.py`: staged builds, atomic
+publish, rollback, revocation ledger, fingerprint gate); deny-by-default
+egress boundary (`rag/egress.py`) wired into generation/retries/NLU/
+condensation/embeddings/judges; ingestion stamping + `--site`/`--collection`
+flags; legacy direct calls degrade to public-only (explicit 422/404 for
+retired paths). Live migration on the test-Bench corpus: backfilled 7,410
+public + 325 project chunks (vectors untouched, metadata backup kept),
+published `gen-1-m4` (384-dim fingerprint verified), served live.
+Negatives proven live (cross-site/intra-site/unstamped absent from all
+candidates; legacy public-only); role grant/revoke effective immediately
+(no restart); full deletion→rollback→revocation-refusal cycle live;
+15/15 held-out questions non-empty under authorized scope with zero
+legacy leaks; G3 boundary regression re-passed. Limits: generation LLM
+unreachable here, so chat-path retrieval and cited-RAG-with-history are
+unit/operator-probe covered only; Frappe role resolution sits atop
+Frappe's own roles cache (a deleted Role left a stale entry until explicit
+`hdel` — recorded caveat for revocation timing); `ARCHITECTURE.md` still
+describes pre-M4 retrieval (separate HLD reconciliation, not edited here).
+Test data cleaned (0 threads, fixtures removed, probe disabled, roles
+restored). Suites: 256 Python OK, 67 Node PASS. No commit/push; live Bench
+left running with the app installed.
 
 ## 2026-09-18 frappe-owned-conversation-state — implementation and live evidence
 

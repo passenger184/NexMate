@@ -75,6 +75,30 @@ def _mode_for_user(user: str) -> str:
     return "developer" if any(role in mapping for role in frappe.get_roles(user)) else "employee"
 
 
+SCOPE_DERIVED_BY_MARKER = "frappe-gateway"
+
+
+def _authz_scope(user: str, site: str, mode: str) -> dict:
+    """Frappe-derived retrieval authorization scope (M4 acl-aware-retrieval).
+
+    Authoritative by construction: site from the server, tiers from the
+    derived persona (employee stays public-tier — no access expansion),
+    roles from the authenticated user's actual roles (developer only).
+    Inference validates structure and consistency only; it never grants
+    authorization.
+    """
+    if mode == "employee":
+        return {"site": site, "tiers": ["public"], "roles": [],
+                "derived_by": SCOPE_DERIVED_BY_MARKER}
+    try:
+        roles = [role for role in frappe.get_roles(user)
+                 if _valid_identity(role)]
+    except Exception:
+        roles = []
+    return {"site": site, "tiers": ["public", "site", "restricted"],
+            "roles": roles, "derived_by": SCOPE_DERIVED_BY_MARKER}
+
+
 def _forward(url: str, key: str, envelope: dict, read_timeout: float) -> dict | str:
     try:
         with requests.Session() as client:
@@ -211,6 +235,8 @@ def ask(question: str, conversation_id: str | None = None) -> dict:
         "mode": _mode_for_user(user),
         "execution_scope": "chat-only",
     }
+    envelope["scope"] = _authz_scope(
+        user, site, envelope["mode"])
     if conversation_id is not None:
         name = _conversation_id_argument(conversation_id)
         prior = _owned(conversations.read_turns, name)
