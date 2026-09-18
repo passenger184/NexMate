@@ -1,8 +1,8 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-18 — `acl-aware-knowledge-retrieval` (M4) implemented (25/25 tasks) and live-verified; uncommitted, unarchived.
+**Last updated:** 2026-09-18 — `acl-aware-knowledge-retrieval` (M4) implemented (25/25 tasks), live-verified, spec-synced, archived, committed as `86e9047` and pushed to `origin/main`. M4 complete.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
-**Current task:** M4 awaiting user review; archive (`/opsx-archive`) only on approval. No commit/push performed.
+**Current task:** M4 closed. Active milestone advanced to **M5: Durable Tool Execution & Audit Ledger** — requires a separately approved OpenSpec change; not started, nothing authorized.
 
 ## 2026-09-18 acl-aware-knowledge-retrieval — implementation and live evidence
 
