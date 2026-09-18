@@ -1,8 +1,8 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-18 — `frappe-owned-conversation-state` implemented and live-verified in the test Bench (22/22 tasks); no commit/push.
+**Last updated:** 2026-09-18 — `frappe-owned-conversation-state` (G3) implemented, live-verified, spec-synced, archived, committed as `ae9fcc8` and pushed to `origin/main`.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
-**Current task:** Awaiting user review of the `frappe-owned-conversation-state` implementation; archive when approved. Successor work (if any) needs a separately approved change.
+**Current task:** G3 closed. Active pointer per user direction: M4 (ACL-aware knowledge retrieval & grounded context assembly) — requires a separately approved OpenSpec change; not started, nothing authorized.
 
 ## 2026-09-18 frappe-owned-conversation-state — implementation and live evidence
 

@@ -16,6 +16,19 @@ Current scope is one project. Shared multi-workspace routing, MCP and the
 separate Developer Workbench remain deferred. Site-isolated private
 knowledge is an approved target, not a selected shared-tenancy mechanism.
 
+## Active pointer — 2026-09-18
+
+G3 `frappe-owned-conversation-state` is complete: implemented (22/22 tasks),
+live-verified in the test Bench, synced to `openspec/specs/`, archived, and
+committed as `ae9fcc8` on `origin/main`. Per user direction the active
+pointer advances to **M4 — ACL-aware knowledge retrieval & grounded context
+assembly** (isolated knowledge/providers direction: R01–R03, R13, R16,
+R18–R19). This pointer authorizes no implementation: M4 needs a separately
+approved OpenSpec change with its own requirements, design, and acceptance
+evidence. G3 delivered owned conversation state only; remaining M3 aspects
+(authorized page context, streaming/realtime, durable proposals/approvals)
+are not claimed and stay future-gated.
+
 ## Historical Phase 1–8 acceptance
 
 Evidence is dated in `progress/CURRENT.md` and `progress/JOURNAL.md`.
