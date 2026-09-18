@@ -2,7 +2,58 @@
 
 **Last updated:** 2026-09-17 — `authenticated-frappe-control-plane` user-authorized bounded acceptance/handoff recorded: 20/21 tasks complete; only real Bench/Desk verification (6.3) remains open.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
-**Current task:** Documentation-only acceptance completion in DEVELOPMENT.md, this file, JOURNAL.md and the change's tasks.md. Tasks 6.1 and 7.3 closed by explicit user authorization; no runtime changes, test reruns or successor creation.
+**Current task:** Task 6.3 live Bench/Desk verification executed 2026-09-18 (see section below); no commit/push; successor not started.
+
+## 2026-09-18 Task 6.3 verification — live Bench/Desk acceptance (PASSED with noted limits)
+
+Environment (user-scoped to `~/copilot/frappe_docker_copilot_test`, project
+`frappe_docker_copilot_test`): Docker Desktop 4.86.0 recovered from the
+2026-09-17 WSL-integration outage on its own; no Bench/Docker repair was
+needed. 8 services Up (backend/frontend/websocket/queues/scheduler,
+mariadb:11.8 healthy, redis ×2), image `frappe/erpnext:v16.33.0`, single
+site `frontend` (default), Frappe 16.31.0 / ERPNext 16.33.0. NexMate
+installed live-container style (existing `frappe_app/` copied into
+containers, `env/bin/pip install -e`, `install-app`, `bench build`;
+frontend serves built `copilot.bundle.7NJBDU3K.js` + css, both HTTP 200).
+FastAPI ran from this repo (`.venv` uvicorn :8000) with a strong 64-hex
+test key, `NEXMATE_FRAPPE_SITE=frontend`, `ENV=development`,
+`DEV_UNAUTHENTICATED=0`; stopped after the run. Site config:
+`copilot_api_base=http://host.docker.internal:8000` (resolves in-container),
+`nexmate_developer_roles=["System Manager"]` (JSON list via `--parse`),
+`nexmate_inference_timeout=30` (JSON number via `--parse`).
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Desk reachable | PASS — `:8081/desk/home` 200 (442 KB) as Administrator |
+| 2 | App loaded | PASS — Desk HTML includes built bundle hash; `bench list-apps`/Module Def/hooks confirm install; `get_versions` lists all 3 apps |
+| 3 | Authenticated `ask()` | PASS — session-cookie + CSRF POST → 200 (`smalltalk/high`, `capability/high`) |
+| 4 | No direct browser→inference | PASS — Desk flag is `pathname==="/ui/preview.html"`; Desk path fetches same-origin `/api/method/...` only (0 `:8000` fetches); gateway-only key server-side; leak scans (key vs Desk HTML/bundle/logs) clean |
+| 5 | Server-side user/site/mode | PASS — mode derived from actual roles; forged `user`/`execution_scope` fields → `unsupported_gateway_fields`; site mismatch → sanitized `gateway_upstream_http_error` |
+| 6 | No browser elevation | PASS — mapping `[]` + browser `mode:"developer"` → `employee` (2/2, no implicit admin elevation); `["System Manager"]` → `developer` (3/3); browser `mode:"employee"` ignored (3/3) |
+| 7 | Server-side credential forwarding | PASS — end-to-end 200s only possible with valid key (fail-closed service); wrong-key rotation produced safe gateway failure, restored after |
+| 8 | FastAPI rejects without key | PASS — no header → 401 `service_credential_required`; wrong key → 401 `invalid_service_credential` (strict even in development) |
+| 9 | Minimal `/health` | PASS — exact `{"status":"ok"}`, unauthenticated, incl. from inside the container |
+| 10 | Chat-only preserved | PASS — versions suppressed (`unknown/unavailable`); capability text describes chat only |
+| 11 | No code/ERPNext/write dispatch | PASS — code + ERPNext probes → deterministic Desk-unavailable denial; write probe → clarify/low; Customer count 0 before and after |
+| 12 | Normal chat | PASS (bounded) — `hi`/`help` high-confidence; LLM-backed RAG untested (see limits) |
+
+Limits (unchanged scope, not failures): generation LLM unreachable from
+this runner (LiteLLM errors → safe degraded `clarify`, no tools/leak), so
+cited-RAG answers were not exercised live; Desk start-fresh button not
+clicked live (static code evidence only); transcript restore/streaming/
+realtime remain target work. Operational lessons: (a) gunicorn workers
+cache site config — `set-config` needs `--parse` for JSON types AND a
+backend restart before retest (one false "mode honored" reading was stale-
+worker flap, disproven 3/3 after restart); (b) repo app has three
+Bench-install gaps, shimmed container-side ONLY (repo untouched):
+`env/bin/python` is the frappe runtime (not `/usr/local/bin`), model-sync
+needs an (empty) `<app>/<Desk-module>` submodule for the `modules.txt`
+entry, `app_description` hook is required by `get_versions()`, and
+`public/` must live under `<app>/<pkg>/public` for esbuild discovery;
+(c) `sites/assets` symlinks to container-local `bench/assets`, so built
+files were mirrored backend→frontend for nginx. Archived change and specs
+left untouched (still record 20/21 pending this note); no commit/push;
+`frappe-owned-conversation-state` not started.
 
 ## 2026-09-17 authenticated boundary — implementation and bounded evidence
 

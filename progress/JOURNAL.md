@@ -905,3 +905,43 @@ made and why (per `AGENTS.md`'s guidance on low-stakes ambiguity).
   cloud consent. No tests, lint/typecheck installs, network/runtime changes,
   staging, commit or archive were performed by this pass. Strict OpenSpec
   change validation and `git diff --check` re-run clean after these edits.
+
+## 2026-09-18 — Task 6.3 live Bench/Desk acceptance (scoped env repair + install + 12 checks)
+
+User rescoped all Docker/Bench work to `~/copilot/frappe_docker_copilot_test`
+only (other checkouts off-limits), then approved read-only container
+inspection, then Phase 2–4 with explicit operational decisions (live-
+container install, `host.docker.internal:8000`, test key, roles
+`["Administrator"]`, timeout 30, dev-strict). No successor work.
+
+- Phase 1/2: Docker Desktop had self-recovered (4.86.0, client/server
+  29.7.2); project `frappe_docker_copilot_test` fully Up on :8081, image
+  v16.33.0 (local `pwd.yml` diff: 8× image bumps + frontend 8080→8081, no
+  secrets). No repair needed. `host.docker.internal` resolves in-container;
+  container→host :8000 verified 200 before wiring.
+- Phase 3 findings (container-side shims ONLY, repo untouched): (1) bench
+  re-execs frappe commands under `env/bin/python`, so `pip install -e` must
+  target the bench env in every python container; (2) model-sync imports
+  `<app>.<modules.txt-entry>`, so an empty Desk-module submodule was added
+  in-container; (3) `get_versions()` crashes without an `app_description`
+  hook — added in-container, which unblocked Desk boot; (4) esbuild only
+  discovers `public/` under `<app>/<pkg>/public`, so it was relocated
+  in-container, after which `copilot.bundle.7NJBDU3K.js` built;
+  (5) `sites/assets` symlinks to container-local `bench/assets`, so built
+  files were mirrored backend→frontend for nginx (bundle+css 200).
+  `install-app` completed (DB global, Module Def, hooks); `apps.txt` entry
+  added as `get-app` would. Also learned: `bench set-config` stores
+  strings unless `--parse` is passed (roles list + timeout number), and
+  gunicorn workers cache site config across `clear-cache` — restart
+  backend after config changes; one stale-worker flap briefly mimicked
+  browser-mode-honoring and was disproven 3/3 post-restart.
+- Phase 4: all 12 checks passed with live evidence (session-cookie + CSRF
+  as Administrator; forged fields refused; `[]` mapping denies elevation;
+  site-mismatch sanitized; 401s strict; health minimal; chat-only denials;
+  Customer count 0→0; leak scans clean). Limits: generation LLM
+  unreachable here (LiteLLM errors → safe degraded clarify), so cited-RAG
+  generation is untested live; start-fresh button not clicked live. FastAPI
+  stopped after the run; Bench left running with the app installed.
+- Recorded in CURRENT.md (new section above); archived change/specs
+  untouched; no commit/push. Full test-by-test table in the Phase 5
+  report message.
