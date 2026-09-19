@@ -1,0 +1,9 @@
+{
+  "apps": [
+    {
+      "url": "https://github.com/passenger184/NexMate",
+      "branch": "main",
+      "directory": "frappe_app"
+    }
+  ]
+}

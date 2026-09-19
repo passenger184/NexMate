@@ -976,3 +976,10 @@ container install, `host.docker.internal:8000`, test key, roles
 - Synced hardened source into live test container (docker cp 4 files, hashes match) and migrated M5 DocTypes (bench --site frontend migrate exit 0, 4 tables, 0 rows, no business writes).
 - Live Phase 4B re-verification: NMTP-00006 pending (naive DB, hash 0a58ac…), approved→executing→succeeded (mock), rejected→bad_status, expired past -1 min→ExpiredProposal, 5 proposals/9 audits then cleaned to 0,0 via direct DB DELETE (test-only).
 - Archived M5 change (openspec archive --yes) syncing 5 specs (audit-ledger, debug-transparency, durable-tool-execution, endpoint-access-control, frappe-api-gateway) and closed ROADMAP M4→M5 to M5→M6.
+
+## [2026-09-19] M6 m6-open-source-packaging — closure
+
+- Investigation-first packaging change (13/13 tasks): Option A preserved the monorepo (no move, no root shim); `apps.json` added with `directory: frappe_app`. Plain root-level `bench get-app` proven undiscoverable on bench 5.31.0 (`FileNotFoundError: .../apps/m6-getapp-test/setup.py` negative test; temp clone removed both sides).
+- Live verification on site `test-fresh-clone` only (bench 5.31.0, Frappe 16.31.0, app 0.1.0): replaced stale pre-M5 container copy (`docker cp frappe_app`, `chown`, dropped `__pycache__`), `./env/bin/pip install -e` OK, `bench --site test-fresh-clone migrate` exit 0 (`Updating DocTypes for erpnext_ai_copilot: 100%`). Verified 4 DocTypes, 4 `tabNexMate%` tables, counts 0, `get_versions` title/description OK, installed-path import OK, synthetic proposal fail-closed with no row and no inference call. Note: bare `execute 'import ...'` is invalid bench syntax; valid dotted/get_attr forms used.
+- Offline: `330` Python tests OK (1 skipped), `67` Node PASS, `py_compile` OK, strict OpenSpec validation passed, `git diff --check` clean. Frontend/shared site read only (4 DocTypes, 0 rows) — never migrated; no production deployment.
+- Archived as `2026-09-19-m6-open-source-packaging` (synced `frappe-app-packaging`, `fresh-installation` + gateway non-regression into `openspec/specs/`); ROADMAP/CURRENT record M6 CLOSED with no active pointer.

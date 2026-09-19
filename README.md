@@ -119,6 +119,25 @@ unauthenticated local development workflow, remove that line entirely and
 unset any inherited value, or configure a valid key. Blank is invalid, not
 unset. Both exact development settings below are still required.
 
+## Install the Frappe application (fresh Bench)
+
+The Frappe application is `frappe_app/` (`frappe_app/pyproject.toml` name `erpnext_ai_copilot`). It is self-contained (`frappe_app/erpnext_ai_copilot` imports without `config`/`tools`, verified offline by `tests/test_frappe_isolation.py` and an isolated `PYTHONPATH=frappe_app` subprocess import). The repo root has no `pyproject.toml`/`setup.py`, so plain `bench get-app <repo-url>` against the repository root is not expected to discover the app; the supported path is the `apps.json` subdirectory method (frappe_docker custom image). For a fresh Bench/site (no `~/ERPNext-AI` on `PYTHONPATH`):
+
+```bash
+# apps.json (repo root; consumed by the frappe_docker custom-image build):
+# {"apps": [{"url": "https://github.com/passenger184/NexMate", "branch": "main", "directory": "frappe_app"}]}
+
+bench --site <fresh-site> install-app erpnext_ai_copilot
+bench --site <fresh-site> migrate
+# Verify DocTypes (no business writes):
+bench --site <fresh-site> execute 'frappe.get_all("DocType", filters={"name":["like","NexMate%"]})'
+# Expected: 4 rows (NexMate Tool Proposal, NexMate Audit Entry,
+# NexMate Conversation, NexMate Conversation Turn) and 4 tables
+# matching SHOW TABLES LIKE 'tabNexMate%'.
+```
+
+`frappe_app/` remains the monorepo subdirectory (`frappe_app/erpnext_ai_copilot/` + `frappe_app/public/` + `service/`/`rag/`/`tools/` outside the app). No `172.30.224.1`, `localhost:8081`, or `frappe_docker_copilot_test` container names are required. Verified live 2026-09-19 on site `test-fresh-clone` (bench 5.31.0, Frappe 16.31.0, app 0.1.0): `migrate` exit `0`, 4 DocTypes, 4 tables, `0` rows. Plain `bench get-app <repo-url>` does not discover the monorepo (bench expects root `setup.py`); use the `apps.json` method. (Note: `bench execute` takes a dotted method path or expression — bare `import x` statements are not valid `execute` input.)
+
 ## Run the service
 
 ```bash
