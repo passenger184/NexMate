@@ -211,6 +211,30 @@ def propose_write(action: str, doctype: str, payload: dict,
     }
 
 
+def execute_approved_write(method: str, path: str, body: dict) -> dict:
+    """Execute an already-durably-approved write (M5 durable path).
+
+    Called only after Frappe durable approval, permission recheck, and exact
+    approved-payload enforcement. Re-checks `ERPNEXT_WRITE_ENABLED` (flag may
+    have been switched off since approval), validates method/path/body are
+    bounded (POST/PUT only, no DELETE, no absolute URLs), then performs the
+    single authenticated `_send`. No RAM proposal store is used; the durable
+    proposal hash already guarantees exact payload. Raises WriteRefusal on
+    policy violation, WriteTransportError with `timeout`/`uncertain` marker
+    on transport timeout (caller maps to `uncertain`, never blind replay).
+    """
+    assert_writes_enabled()
+    if method not in ("POST", "PUT"):
+        raise WriteRefusal("unsupported_action", f"method must be POST/PUT, got {method!r} (DELETE absent)")
+    if not path or path.startswith("http") or ".." in path or not isinstance(body, dict):
+        raise WriteRefusal("bad_request", "path must be a relative resource path with JSON object body")
+    try:
+        return _send(method, path, body)
+    except WriteTransportError as exc:
+        # Preserve timeout marker for uncertain mapping upstream
+        raise exc
+
+
 def apply_write(proposal_id: str, confirmed: bool) -> dict[str, Any]:
     """Execute a proposal after explicit confirmation; audit-log the result."""
     if not confirmed:

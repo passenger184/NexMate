@@ -30,16 +30,37 @@ except Exception:
     frappe = None  # type: ignore
     HAS_FRAPPE = False
 
-import config
+# App-local audit contract (no repo-root config/tools/service imports).
+# Mirrors the redaction semantics used by inference-side egress; see Phase 4A.
 
 AUDIT_DOCTYPE = "NexMate Audit Entry"
-_FALLBACK_DIR = Path(config.PROJECT_ROOT) / "data" / "audit_ledger"
 _SECRET_RE = re.compile(r"\b[0-9a-fA-F]{64}\b")
 _SENSITIVE_KEYS = {"password", "passwd", "secret", "token", "api_key", "authorization", "x-nexmate-key"}
 
+
+def _fallback_base_dir() -> Path:
+    """Isolated dev/test fallback base without repo-root config import.
+
+    Explicit `NEXMATE_DURABLE_DIR` wins. Otherwise, when running inside
+    Frappe, use the site's private files area; when Frappe is unavailable
+    (offline unit tests), use `<app>/private/durable_fallback` derived from
+    this file's location. Never imports repo-root `config.py`.
+    """
+    explicit = os.environ.get("NEXMATE_DURABLE_DIR")
+    if explicit:
+        return Path(explicit)
+    if HAS_FRAPPE:
+        try:
+            return Path(frappe.get_site_path("private", "files", "nexmate_durable"))  # type: ignore
+        except Exception:
+            pass
+    return Path(__file__).resolve().parent / "private" / "durable_fallback"
+
+
 def _fallback_dir() -> Path:
-    _FALLBACK_DIR.mkdir(parents=True, exist_ok=True)
-    return _FALLBACK_DIR
+    d = _fallback_base_dir() / "audit_ledger"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 def _should_use_frappe() -> bool:
     if os.environ.get("NEXMATE_DURABLE_FALLBACK") == "1":
@@ -50,6 +71,38 @@ def _should_use_frappe() -> bool:
         return bool(getattr(frappe, "db", None) and getattr(frappe.local, "site", None))
     except Exception:
         return False
+
+
+class AuditUnavailable(Exception):
+    """Authoritative audit store unavailable and no explicit fallback."""
+
+    def __init__(self, category: str = "frappe_unavailable", detail: str = ""):
+        super().__init__(detail)
+        self.category = category
+        self.detail = detail
+
+
+def _fallback_explicitly_allowed() -> bool:
+    """Explicit isolated dev/test mode only (fail closed by default)."""
+    return os.environ.get("NEXMATE_DURABLE_FALLBACK") == "1"
+
+
+def _require_durable_store() -> None:
+    """Fail closed when Frappe unavailable and no explicit fallback.
+
+    Production (default) without Frappe → AuditUnavailable, no silent local
+    JSON. Explicit `NEXMATE_DURABLE_FALLBACK=1` allows isolated dev/test file
+    fallback and must never be set in production.
+    """
+    if _should_use_frappe():
+        return
+    if _fallback_explicitly_allowed():
+        return
+    raise AuditUnavailable(
+        "frappe_unavailable",
+        "Durable Frappe audit store unavailable; failing closed, no local "
+        "fallback (set NEXMATE_DURABLE_FALLBACK=1 only for explicit isolated dev/test)",
+    )
 
 def _current_user() -> str:
     if HAS_FRAPPE and frappe and getattr(frappe, "session", None):
@@ -108,6 +161,7 @@ def record_audit(
     outcome: str = "pending",
     details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    _require_durable_store()
     actor = actor or _current_user()
     site = site or _current_site()
     if not correlation or not action:
@@ -159,6 +213,7 @@ def record_audit(
 
 def query_by_correlation(correlation: str, actor: str | None = None, site: str | None = None) -> list[dict[str, Any]]:
     """Return audit entries for a correlation, enforcing access control."""
+    _require_durable_store()
     actor = actor or _current_user()
     site = site or _current_site()
     if not correlation:

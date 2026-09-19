@@ -19,7 +19,7 @@ except Exception:
     frappe = None  # type: ignore
     HAS_FRAPPE = False
 
-import config
+# No repo-root imports: this module uses only stdlib + frappe (when available).
 
 def _current_user() -> str:
     if HAS_FRAPPE and frappe and getattr(frappe, "session", None):
@@ -66,7 +66,7 @@ def get_debug_view(correlation: str, actor: str | None = None, site: str | None 
         raise PermissionError("debug view denied")
 
     # Fetch audit entries for correlation (authorized)
-    from frappe_app.erpnext_ai_copilot.audit import query_by_correlation, record_audit
+    from .audit import query_by_correlation, record_audit
     entries = query_by_correlation(correlation, actor=actor, site=site)
 
     # Build minimized view: only successes and permitted provenance

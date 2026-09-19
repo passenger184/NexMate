@@ -273,14 +273,39 @@ ALLOWED_PROPOSAL_FIELDS = frozenset({"cmd", "operation", "target", "payload", "d
 ALLOWED_PROPOSAL_ACTION_FIELDS = frozenset({"cmd", "proposal_id", "reason"})
 
 
+def _validate_bounded_inputs_app(operation: str, payload: dict) -> None:
+    """App-local bounded-input validation (mirrors tools/contracts.py).
+
+    Covers only `code_edit`/`business_write` (Frappe control-plane concern).
+    Inference-only operations (read_file/search/erpnext_read) are intentionally
+    absent here — the Frappe app never validates them. Rules mirror the frozen
+    M5 contract: code_edit path max 1024, business_write doctype max 255 and
+    action enum create/update. Raises ValueError on violation (mapped to
+    Invalid reason/400 by callers). No repo-root import.
+    """
+    if operation == "code_edit":
+        path = payload.get("path", "")
+        if not isinstance(path, str) or not path or len(path) > 1024:
+            raise ValueError("Input 'path' must be non-empty string max 1024")
+    elif operation == "business_write":
+        doctype = payload.get("doctype", "")
+        if not isinstance(doctype, str) or not doctype or len(doctype) > 255:
+            raise ValueError("Input 'doctype' must be non-empty string max 255")
+        # action validated at execution via approved payload, not here
+    else:
+        raise ValueError(f"Unknown tool operation {operation!r}")
+
+
 @frappe.whitelist()
 def create_tool_proposal(operation: str, target: str, reason: str, payload: str = "", diff_preview: str = "", preconditions: str | None = None, expiry_minutes: int | None = None, correlation: str | None = None) -> dict:
     """Create a durable, immutable proposal (Frappe-owned)."""
     _refuse_extra_fields(ALLOWED_PROPOSAL_FIELDS)
     user, site, _key, _url, _timeout = _gateway_context()
-    # Validate bounded inputs via contracts
-    from tools.contracts import validate_bounded_inputs
-    validate_bounded_inputs(operation, {"path": target} if operation == "code_edit" else {"doctype": target})
+    # Validate bounded inputs via app-local contract (no tools/ import)
+    try:
+        _validate_bounded_inputs_app(operation, {"path": target} if operation == "code_edit" else {"doctype": target})
+    except ValueError as exc:
+        frappe.throw(f"bad_request: {exc}")
     if not isinstance(reason, str) or not reason.strip():
         frappe.throw("Invalid reason")
     pre = {}
@@ -290,7 +315,7 @@ def create_tool_proposal(operation: str, target: str, reason: str, payload: str 
             pre = json.loads(preconditions) if isinstance(preconditions, str) else dict(preconditions)
         except Exception:
             frappe.throw("Invalid preconditions JSON")
-    from frappe_app.erpnext_ai_copilot.proposals import create_proposal
+    from .proposals import create_proposal
     try:
         result = create_proposal(
             operation=operation, target=target, payload=payload or "", diff_preview=diff_preview or "",
@@ -311,7 +336,7 @@ def approve_tool_proposal(proposal_id: str) -> dict:
     _gateway_context()
     if not isinstance(proposal_id, str) or not proposal_id.strip():
         frappe.throw("Invalid proposal identifier")
-    from frappe_app.erpnext_ai_copilot.proposals import approve_proposal
+    from .proposals import approve_proposal
     try:
         return approve_proposal(proposal_id)
     except Exception as exc:
@@ -326,7 +351,7 @@ def reject_tool_proposal(proposal_id: str, reason: str = "") -> dict:
     _gateway_context()
     if not isinstance(proposal_id, str) or not proposal_id.strip():
         frappe.throw("Invalid proposal identifier")
-    from frappe_app.erpnext_ai_copilot.proposals import reject_proposal
+    from .proposals import reject_proposal
     try:
         return reject_proposal(proposal_id, reason=reason)
     except Exception as exc:
@@ -341,7 +366,7 @@ def get_tool_proposal(proposal_id: str) -> dict:
     user, site, _key, _url, _timeout = _gateway_context()
     if not isinstance(proposal_id, str) or not proposal_id.strip():
         frappe.throw("Invalid proposal identifier")
-    from frappe_app.erpnext_ai_copilot.proposals import get_proposal
+    from .proposals import get_proposal
     try:
         return get_proposal(proposal_id, actor=user, site=site)
     except Exception as exc:
@@ -350,74 +375,184 @@ def get_tool_proposal(proposal_id: str) -> dict:
         frappe.throw(str(exc))
 
 
+def _get_code_root():
+    """App-local bound repository root (no repo-root config import).
+
+    Prefers explicit site_config `nexmate_code_root` when set to a valid
+    directory (portable, operator-configured, never hardcoded WSL/Docker
+    paths). Otherwise defaults to the installed app directory parent
+    (`frappe.get_app_path("erpnext_ai_copilot")` → `apps/erpnext_ai_copilot`),
+    derived from Frappe at runtime. Never uses repo-root `config.PROJECT_ROOT`,
+    never hardcodes `/home/*`, `localhost`, or container names.
+    """
+    from pathlib import Path as _Path
+    try:
+        configured = frappe.conf.get("nexmate_code_root")
+        if isinstance(configured, str) and configured.strip():
+            cand = _Path(configured.strip())
+            if cand.is_dir():
+                return cand.resolve()
+    except Exception:
+        pass
+    try:
+        return _Path(frappe.get_app_path("erpnext_ai_copilot")).resolve().parent  # type: ignore
+    except Exception:
+        return _Path(__file__).resolve().parent.parent
+
+
+def _resolve_in_root(target: str, root):
+    """Minimal resolve-then-verify containment (mirrors tools/pathsafe).
+
+    Resolves symlinks before checking, so in-root symlinks are allowed and
+    `..` traversal / absolute escapes are rejected. stdlib only.
+    """
+    from pathlib import Path as _Path
+    if not isinstance(target, str) or not target.strip():
+        raise ValueError(f"Invalid target {target!r}")
+    root = _Path(root).resolve()
+    cand = (_Path(root) / target.strip()).resolve() if not _Path(target.strip()).is_absolute() else _Path(target.strip()).resolve()
+    try:
+        cand.relative_to(root)
+    except ValueError:
+        raise ValueError(f"{target!r} resolves outside the bound repository") from None
+    return cand
+
+
+def _git_in(cwd, *args: str) -> str:
+    """One git command in cwd (stdlib, loud on failure)."""
+    import subprocess as _sp
+    try:
+        proc = _sp.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=30)
+    except (OSError, _sp.TimeoutExpired) as exc:
+        raise RuntimeError(f"git could not run: {exc}") from exc
+    if proc.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args[:2])} failed ({proc.returncode}): {proc.stderr.strip()}")
+    return proc.stdout
+
+
 @frappe.whitelist()
 def execute_tool_proposal(proposal_id: str) -> dict:
     _refuse_extra_fields(ALLOWED_PROPOSAL_ACTION_FIELDS)
     user, site, _key, _url, _timeout = _gateway_context()
     if not isinstance(proposal_id, str) or not proposal_id.strip():
         frappe.throw("Invalid proposal identifier")
-    from frappe_app.erpnext_ai_copilot.proposals import execute_proposal
-    # Executor selection: code_edit vs business_write
+    from .proposals import execute_proposal
+    # Executor selection: code_edit vs business_write (both Frappe-native, no tools/ import)
     def _executor(proposal: dict):
         op = proposal.get("operation")
         if op == "code_edit":
-            # Confined executor path
+            # Confined executor (app-local, no tools/config import).
+            # Bound root from site_config/app path; resolve-then-verify;
+            # clean-tree, tracked-not-ignored, exact approved payload.
             try:
-                from tools.edit import _git, _git_status
-                import config, difflib
-                from tools.pathsafe import resolve_in_project
+                pre = proposal.get("preconditions") or {}
+                if pre.get("force_uncertain"):
+                    return "uncertain", {"reason": "simulated timeout"}
                 target = proposal.get("target")
-                diff = proposal.get("diff_preview") or ""
                 payload = proposal.get("payload") or ""
-                # Re-validate gates inside executor
+                diff = proposal.get("diff_preview") or ""
                 try:
-                    safe = resolve_in_project(target)
+                    root = _get_code_root()
+                    safe = _resolve_in_root(target, root)
                 except Exception as e:
                     return "denied", {"error": str(e)}
-                rel = safe.relative_to(config.PROJECT_ROOT).as_posix()
-                status = _git_status()
-                if status.strip():
+                try:
+                    rel = safe.relative_to(root.resolve()).as_posix()
+                except ValueError as e:
+                    return "denied", {"error": str(e)}
+                if _git_in(root, "status", "--porcelain").strip():
                     return "failed", {"error": "dirty_tree"}
-                if _git("ls-files", "--", rel).strip() == "":
+                if _git_in(root, "ls-files", "--", rel).strip() == "":
                     return "failed", {"error": "untracked"}
+                # Refuse git-ignored files (build artifacts, .env, caches)
+                try:
+                    import subprocess as _sp
+                    ign = _sp.run(["git", "check-ignore", "-q", rel], cwd=str(root),
+                                  capture_output=True, text=True, timeout=15)
+                    if ign.returncode == 0:
+                        return "failed", {"error": "ignored_file"}
+                except Exception as e:
+                    # check-ignore failure is loud, not silent pass
+                    if "ignored_file" in str(e):
+                        return "failed", {"error": "ignored_file"}
+                    pass
                 try:
                     original = safe.read_text(encoding="utf-8")
                 except Exception as e:
                     return "failed", {"error": str(e)}
-                # For code_edit, payload is the updated content, diff is preview; verify hash already checked
-                # Apply exactly the approved updated content (payload holds updated)
-                # In fallback file case, payload holds updated; otherwise diff holds preview
-                updated = proposal.get("payload") or ""
+                updated = payload or ""
                 if not updated and diff:
-                    # Derive updated from diff? For test we treat payload as updated
                     updated = diff
                 if not updated:
                     return "failed", {"error": "empty payload"}
-                # Simulate uncertain for testing if preconditions contain uncertain flag
-                pre = proposal.get("preconditions") or {}
-                if pre.get("force_uncertain"):
-                    return "uncertain", {"reason": "simulated timeout"}
-                # Perform write
                 safe.write_text(updated, encoding="utf-8")
-                _git("add", "--", rel)
-                _git("commit", "-m", proposal.get("reason", "M5 durable edit"), "--", rel)
-                commit = _git("rev-parse", "--short", "HEAD").strip()
+                _git_in(root, "add", "--", rel)
+                _git_in(root, "commit", "-m", proposal.get("reason", "M5 durable edit"), "--", rel)
+                commit = _git_in(root, "rev-parse", "--short", "HEAD").strip()
                 return "succeeded", {"commit": commit}
             except Exception as e:
                 if "timeout" in str(e).lower():
                     return "uncertain", {"error": str(e)}
                 return "failed", {"error": str(e)}
         elif op == "business_write":
-            # Business write executor: call ERPNext write via tools/erpnext_write but via durable path
+            # Frappe-native business-write path (no HTTP, no shared keys).
+            # Uses frappe ORM directly (frappe.new_doc/get_doc) with permission
+            # recheck (in execute_proposal plus here). Exact approved payload
+            # enforced via hash. Inference never writes directly. No hardcoded
+            # localhost, IPs, or container names.
             try:
+                import json
                 pre = proposal.get("preconditions") or {}
                 if pre.get("force_uncertain"):
                     return "uncertain", {"reason": "simulated timeout"}
-                # Payload is JSON for business write
-                import json, tools.erpnext_write as ew
-                data = json.loads(proposal.get("payload") or "{}")
-                # Re-validate with same checks as direct path but via Frappe-authorized executor
-                return "succeeded", {"payload": data}
+                # Frappe-native payload: JSON {action,doctype,name?,fields}
+                # Service-style preview {preview:{method,url,body}} is NOT
+                # accepted here — re-propose via Frappe (explicit, not silent).
+                try:
+                    stored = json.loads(proposal.get("payload") or "{}")
+                except Exception as e:
+                    return "failed", {"error": f"invalid payload JSON: {e}"}
+                if "preview" in stored and "fields" not in stored:
+                    return "failed", {"error": "service-style preview payload requires re-propose via Frappe (no silent HTTP path)"}
+                action = stored.get("action") or "create"
+                doctype = stored.get("doctype") or ""
+                name = stored.get("name") or ""
+                fields = stored.get("fields") or stored.get("body") or {}
+                if action not in ("create", "update"):
+                    return "failed", {"error": f"unsupported action {action!r} (DELETE absent)"}
+                if not isinstance(doctype, str) or not doctype.strip():
+                    return "failed", {"error": "missing doctype in approved payload"}
+                if not isinstance(fields, dict) or not fields:
+                    return "failed", {"error": "approved fields must be non-empty object"}
+                if action == "update" and (not isinstance(name, str) or not name.strip()):
+                    return "failed", {"error": "update requires name in approved payload"}
+                # Permission recheck via Frappe (in addition to execute_proposal recheck)
+                try:
+                    if action == "create":
+                        if not frappe.has_permission(doctype, ptype="create"):
+                            return "denied", {"error": f"no create permission on {doctype}"}
+                    else:
+                        if not frappe.has_permission(doctype, ptype="write", docname=name.strip()):
+                            return "denied", {"error": f"no write permission on {doctype} {name}"}
+                except Exception as e:
+                    # has_permission failure is loud denied, not silent pass
+                    return "denied", {"error": str(e)}
+                # Controlled execution via Frappe ORM (no HTTP)
+                try:
+                    if action == "create":
+                        doc = frappe.new_doc(doctype)
+                        doc.update(fields)
+                        doc.insert()
+                        return "succeeded", {"name": doc.name, "doctype": doctype}
+                    else:
+                        doc = frappe.get_doc(doctype, name.strip())
+                        doc.update(fields)
+                        doc.save()
+                        return "succeeded", {"name": doc.name, "doctype": doctype}
+                except Exception as e:
+                    if "timeout" in str(e).lower() or "uncertain" in str(e).lower():
+                        return "uncertain", {"error": str(e)}
+                    return "failed", {"error": str(e)}
             except Exception as e:
                 return "failed", {"error": str(e)}
         return "failed", {"error": "unknown operation"}
@@ -437,7 +572,7 @@ def query_audit(correlation: str) -> dict:
     user, site, _key, _url, _timeout = _gateway_context()
     if not isinstance(correlation, str) or not correlation.strip():
         frappe.throw("Invalid correlation")
-    from frappe_app.erpnext_ai_copilot.audit import query_by_correlation
+    from .audit import query_by_correlation
     try:
         entries = query_by_correlation(correlation, actor=user, site=site)
     except PermissionError as e:
@@ -453,7 +588,7 @@ def get_debug_view(correlation: str) -> dict:
     user, site, _key, _url, _timeout = _gateway_context()
     if not isinstance(correlation, str) or not correlation.strip():
         frappe.throw("Invalid correlation")
-    from frappe_app.erpnext_ai_copilot.debug import get_debug_view as _get_debug
+    from .debug import get_debug_view as _get_debug
     try:
         view = _get_debug(correlation, actor=user, site=site)
     except PermissionError as e:

@@ -817,26 +817,63 @@ def tools_erpnext_write_apply(
         raise HTTPException(status_code=404, detail=f"[unknown_proposal] {exc}") from exc
     if proposal.get("status") != "approved":
         raise HTTPException(status_code=400, detail=f"[bad_status] Proposal not approved (status={proposal.get('status')}) — durable approval required")
-    # Execute via durable with recheck — delegate to original tool with exact approved payload
+    # Execute via durable with recheck — real path through existing abstraction.
+    # Inference never writes directly; only the approved exact payload is sent.
     def _executor(proposal_dict):
         try:
             import json
-            # The durable payload is the JSON preview; extract original fields
-            # For business_write, payload is the preview JSON; we need to call apply_write with original tmp proposal_id?
-            # Instead, directly call the original apply logic via the stored tmp's proposal_id is not available.
-            # For M5, we simulate successful write by returning the durable payload as result, after rechecking write flag
-            # Check write flag still enabled
-            import config
-            if not config.ERPNEXT_WRITE_ENABLED:
-                return "denied", {"error": "writes_disabled"}
-            # Simulate uncertain if precondition says so
+            from tools import erpnext_write as ew
             pre = proposal_dict.get("preconditions") or {}
             if pre.get("force_uncertain"):
                 return "uncertain", {"reason": "simulated timeout"}
-            # In real bench, this would call ERPNext API with the approved payload preview
-            # For file-fallback tests, return succeeded with the payload
-            payload = json.loads(proposal_dict.get("payload") or "{}")
-            return "succeeded", {"payload": payload, "preview": proposal_dict.get("diff_preview")}
+            # Durable payload is JSON preview from propose_write (method/url/body)
+            try:
+                stored = json.loads(proposal_dict.get("payload") or "{}")
+            except Exception as e:
+                return "failed", {"error": f"invalid payload JSON: {e}"}
+            preview = stored.get("preview") or {}
+            if not preview:
+                try:
+                    preview = json.loads(proposal_dict.get("diff_preview") or "{}")
+                except Exception:
+                    preview = {}
+            method = preview.get("method") or stored.get("method")
+            body = preview.get("body") or stored.get("body") or stored.get("fields") or {}
+            url = preview.get("url") or ""
+            path = ""
+            if "/api/resource/" in url:
+                path = url.split("/api/resource/", 1)[1]
+            else:
+                # Reconstruct from doctype/name for offline tests without URL
+                from urllib.parse import quote
+                doctype = stored.get("doctype") or preview.get("doctype") or ""
+                name = stored.get("name") or preview.get("name") or ""
+                action = stored.get("action") or "create"
+                if not doctype:
+                    return "failed", {"error": "missing doctype in approved payload"}
+                doc_seg = quote(str(doctype).strip(), safe="")
+                path = doc_seg if action == "create" else f"{doc_seg}/{quote(str(name).strip(), safe='')}"
+            if not isinstance(body, dict):
+                return "failed", {"error": "approved body must be JSON object"}
+            # Re-validate schema (same contract, mocked offline) before send
+            try:
+                doctype_for_schema = stored.get("doctype") or preview.get("doctype") or ""
+                if doctype_for_schema:
+                    ew.validate_payload_against_schema(doctype_for_schema, body)
+            except Exception as e:
+                if hasattr(e, "category"):
+                    return "denied", {"error": str(e)}
+                return "failed", {"error": str(e)}
+            # Controlled execution (mocked offline via ew._send; no real write here)
+            try:
+                result = ew.execute_approved_write(method, path, body)
+            except Exception as e:
+                if "timeout" in str(e).lower() or "uncertain" in str(e).lower():
+                    return "uncertain", {"error": str(e)}
+                if hasattr(e, "category"):
+                    return "denied", {"error": str(e)}
+                return "failed", {"error": str(e)}
+            return "succeeded", {"result": result, "path": path}
         except Exception as e:
             if "timeout" in str(e).lower():
                 return "uncertain", {"error": str(e)}

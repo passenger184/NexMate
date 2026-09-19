@@ -1,5 +1,9 @@
 app_name = "erpnext_ai_copilot"
 app_title = "ERPNext AI Copilot"
+app_publisher = "ERPNext AI Copilot contributors"
+app_description = "Sidebar AI assistant for ERPNext/Frappe developer questions with durable tool execution and audit"
+app_email = "nexmate@example.invalid"
+app_license = "MIT"
 
 # Include the sidebar chat panel in the Desk shell. The bundle is built by
 # `bench build --app erpnext_ai_copilot` from public/js/copilot.bundle.js.

@@ -969,3 +969,10 @@ container install, `host.docker.internal:8000`, test key, roles
   Generation LLM unreachable here, so chat-path retrieval stays
   unit/operator-probe covered. FastAPI stopped after the run; Bench left
   running. Suites: 256 Python OK, 67 Node PASS. No commit/push.
+
+## [2026-09-19] M5 durable-tool-execution-audit — closure
+
+- Hardened (fail-closed, owner-only, hash pre/site, Frappe ORM business-write, app-local code root, 4A self-contained import) and fixed 4B-FIX naive UTC (expiry/executed_at replace(tzinfo=None)) — offline 330 tests OK (1 skipped), 67 Node PASS, 8 OpenSpec strict PASS, git diff --check 0.
+- Synced hardened source into live test container (docker cp 4 files, hashes match) and migrated M5 DocTypes (bench --site frontend migrate exit 0, 4 tables, 0 rows, no business writes).
+- Live Phase 4B re-verification: NMTP-00006 pending (naive DB, hash 0a58ac…), approved→executing→succeeded (mock), rejected→bad_status, expired past -1 min→ExpiredProposal, 5 proposals/9 audits then cleaned to 0,0 via direct DB DELETE (test-only).
+- Archived M5 change (openspec archive --yes) syncing 5 specs (audit-ledger, debug-transparency, durable-tool-execution, endpoint-access-control, frappe-api-gateway) and closed ROADMAP M4→M5 to M5→M6.

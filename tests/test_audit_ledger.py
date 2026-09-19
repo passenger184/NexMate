@@ -114,7 +114,10 @@ class AuditLedgerTest(unittest.TestCase):
         corr = p["correlation"]
         proposals.approve_proposal(p["proposal_id"])
         proposals.execute_proposal(p["proposal_id"], executor_fn=lambda pr: ("uncertain", {}))
-        proposals.reconcile_proposal(p["proposal_id"], outcome="succeeded", details={"x": 1})
+        proposals.reconcile_proposal(
+            p["proposal_id"], outcome="succeeded", details={"x": 1},
+            read_back_fn=lambda proposal: (True, {"confirmed": True}),
+        )
         entries = audit.query_by_correlation(corr)
         actions = {e["action"] for e in entries}
         self.assertIn("uncertain", actions)

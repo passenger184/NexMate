@@ -40,10 +40,9 @@ class DurableExecutionTest(unittest.TestCase):
         stored = proposals.get_proposal(p["proposal_id"])
         self.assertEqual(stored["status"], "approved")
         # Mutating payload hash should be detected on re-fetch (simulate tamper)
-        # Directly tamper fallback file
-        from pathlib import Path
-        import json, config
-        path = Path(config.PROJECT_ROOT) / "data" / "durable_proposals" / f"{p['proposal_id']}.json"
+        # Directly tamper fallback file (app-local path, no repo-root config)
+        import json
+        path = proposals._fallback_path(p["proposal_id"])
         data = json.loads(path.read_text())
         data["payload"] = "tampered"
         path.write_text(json.dumps(data))
@@ -54,10 +53,9 @@ class DurableExecutionTest(unittest.TestCase):
     def test_expiry_enforced(self):
         p = proposals.create_proposal(
             operation="code_edit", target="expire.py", payload="x", diff_preview="d", reason="r", expiry_minutes=0)
-        # Force expiry by setting expiry_ts in past
-        from pathlib import Path
-        import json, config
-        path = Path(config.PROJECT_ROOT) / "data" / "durable_proposals" / f"{p['proposal_id']}.json"
+        # Force expiry by setting expiry_ts in past (app-local path)
+        import json
+        path = proposals._fallback_path(p["proposal_id"])
         data = json.loads(path.read_text())
         data["expiry_ts"] = time.time() - 10
         path.write_text(json.dumps(data))
@@ -131,8 +129,11 @@ class DurableExecutionTest(unittest.TestCase):
         # Blind replay without reconciliation should not auto-succeed
         with self.assertRaises(proposals.ProposalError):
             proposals.execute_proposal(p["proposal_id"], executor_fn=lambda p: ("succeeded", {}))
-        # Now reconcile explicitly
-        reconciled = proposals.reconcile_proposal(p["proposal_id"], outcome="succeeded", details={"reconciled": True})
+        # Now reconcile explicitly with actual read-back evidence
+        reconciled = proposals.reconcile_proposal(
+            p["proposal_id"], outcome="succeeded", details={"reconciled": True},
+            read_back_fn=lambda proposal: (True, {"confirmed": True, "target": proposal.get("target")}),
+        )
         self.assertEqual(reconciled["status"], "reconciled")
         # After reconciliation, retry with same key should not re-apply blindly (still reconciled)
         self.assertEqual(reconciled["status"], "reconciled")
@@ -147,3 +148,62 @@ class DurableExecutionTest(unittest.TestCase):
         # Try to fetch as different actor/site — should be not_owned
         with self.assertRaises(proposals.NotOwnedProposal):
             proposals.get_proposal(p["proposal_id"], actor="attacker", site="evil_site")
+
+    def test_frappe_expiry_datetime_is_naive_utc(self):
+        """Frappe DocType expiry must be naive UTC (MariaDB rejects +00:00).
+
+        Regression for Phase 4B live OperationalError 1292: tz-aware
+        `2026-09-19 09:22:22.147590+00:00` was rejected for `expiry` column.
+        Behavior test (not text search): helper returns tzinfo None with same
+        UTC instant, and create_proposal Frappe branch persists naive.
+        """
+        import datetime
+        ts = 1758278542.14759
+        naive = proposals._frappe_datetime_utc(ts)
+        self.assertIsNone(naive.tzinfo)
+        # Same instant: naive interpreted as UTC equals original timestamp
+        self.assertAlmostEqual(
+            naive.replace(tzinfo=datetime.timezone.utc).timestamp(), ts, places=3)
+        # No suffix in Frappe string form
+        self.assertNotIn("+", naive.isoformat())
+        self.assertNotIn("Z", naive.isoformat())
+
+    def test_create_proposal_frappe_branch_uses_naive_expiry(self):
+        """Mocked-Frappe create persists naive expiry (would otherwise 1292)."""
+        captured = {}
+
+        class FakeDoc:
+            def __init__(self):
+                self.name = "NMTP-TEST123"
+            def update(self, values):
+                captured.update(values)
+            def insert(self, ignore_permissions=True):
+                captured["inserted"] = True
+
+        fake_frappe = mock.MagicMock()
+        fake_frappe.new_doc.return_value = FakeDoc()
+        fake_frappe.db = object()
+        fake_frappe.local = mock.MagicMock()
+        fake_frappe.local.site = "test_site"
+        fake_frappe.session = mock.MagicMock()
+        fake_frappe.session.user = "test_user"
+
+        with mock.patch.object(proposals, "HAS_FRAPPE", True), \
+             mock.patch.object(proposals, "frappe", fake_frappe), \
+             mock.patch.dict(os.environ, {"NEXMATE_DURABLE_FALLBACK": "0"}), \
+             mock.patch("frappe_app.erpnext_ai_copilot.audit.record_audit", return_value={}):
+            # _should_use_frappe True (HAS_FRAPPE + db + site), fallback not forced
+            result = proposals.create_proposal(
+                operation="code_edit", target="naive.py", payload="x", reason="r")
+            self.assertEqual(result["status"], "pending")
+        expiry_doc = captured.get("expiry")
+        self.assertIsNotNone(expiry_doc)
+        self.assertIsNone(expiry_doc.tzinfo)
+        # Same instant as API ISO (tz-aware) response
+        import datetime
+        api_iso = result["expiry"]
+        api_dt = datetime.datetime.fromisoformat(api_iso)
+        self.assertIsNotNone(api_dt.tzinfo)
+        self.assertAlmostEqual(
+            expiry_doc.replace(tzinfo=datetime.timezone.utc).timestamp(),
+            api_dt.timestamp(), places=3)

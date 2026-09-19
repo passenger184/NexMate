@@ -16,10 +16,9 @@ Current scope is one project. Shared multi-workspace routing, MCP and the
 separate Developer Workbench remain deferred. Site-isolated private
 knowledge is an approved target, not a selected shared-tenancy mechanism.
 
-## Active pointer — 2026-09-18
+## Active pointer — 2026-09-19
 
-M4 `acl-aware-knowledge-retrieval` is complete: implemented (25/25 tasks),
-live-verified in the test Bench, synced to `openspec/specs/` (acl-aware-retrieval, index-lifecycle, provider-egress-policy, frappe-api-gateway), archived, and committed as `86e9047` on `origin/main`. Per user direction the active pointer advances to **M5 — Durable Tool Execution & Audit Ledger** (durable tools/approvals/audit direction: R08–R09, R14, R17–R19). This pointer authorizes no implementation: M5 needs a separately approved OpenSpec change with its own requirements, design, and acceptance evidence. M4 delivered coarse-grained retrieval ACL, versioned index generations, and deny-by-default egress; remaining M3 aspects (authorized page context, streaming/realtime) and broader M5 tool/audit work are not claimed and stay future-gated.
+M5 `durable-tool-execution-audit` is complete: implemented (20/20 tasks), hardened (fail-closed, owner-only, hash pre/site, Frappe ORM business-write, app-local code root), offline-verified (`330` Python tests `OK (1 skipped)`, `67` Node PASS, `7` specs + `1` change `strict PASS`), live-verified (Frappe M5 tables created via `bench --site frontend migrate` exit `0`, `tabNexMate Tool Proposal`/`Audit Entry` `0` rows, DocType authority with naive UTC, mock execution `succeeded` + `audit_pending`/`read-back`), archived, and committed as `ba220a8` (M5 offline) plus hardening (this commit) on `origin/main`. Per user direction the active pointer advances to **M6 — Release and deployment parity** (packaging/installation direction: R04–R07, R10). This pointer authorizes no implementation: M6 needs a separately approved OpenSpec change with its own requirements, design, and acceptance evidence. M4 delivered ACL/generations/egress; M5 delivered durable proposals, audit ledger, and filtered Debug. Remaining limitations: live cross-worker concurrency, live second-actor, live business-write, live uncertain/reconcile, and `frappe_app/` subdirectory packaging are documented as future verification/packaging work.
 
 ## Historical Phase 1–8 acceptance
 
