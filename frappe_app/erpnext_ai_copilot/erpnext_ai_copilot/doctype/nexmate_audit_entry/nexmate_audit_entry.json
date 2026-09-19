@@ -1,0 +1,112 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:NMAU-{#####}",
+ "creation": "2026-09-18 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "correlation",
+  "request_id",
+  "action",
+  "actor",
+  "site",
+  "target",
+  "outcome",
+  "details",
+  "redacted"
+ ],
+ "fields": [
+  {
+   "fieldname": "correlation",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Correlation ID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "request_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Request ID",
+   "reqd": 0
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Action",
+   "options": "proposal_created\napproved\nrejected\nexpired\nrecheck\nrecheck_denied\nexecution_attempt\nsucceeded\nfailed\ndenied\nuncertain\nreconciled\naudit_pending\nconflicting\ndebug_view\nsecurity_event\nai_request\nretrieval\ntool_call\ntool_denied",
+   "reqd": 1
+  },
+  {
+   "fieldname": "actor",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Actor",
+   "reqd": 1
+  },
+  {
+   "fieldname": "site",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Site",
+   "reqd": 1
+  },
+  {
+   "fieldname": "target",
+   "fieldtype": "Data",
+   "label": "Target",
+   "reqd": 0
+  },
+  {
+   "default": "pending",
+   "fieldname": "outcome",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Outcome",
+   "options": "pending\nsuccess\ndenied\nfailed\nuncertain\nreconciled\naudit_pending\nconflicting",
+   "reqd": 1
+  },
+  {
+   "fieldname": "details",
+   "fieldtype": "Text",
+   "label": "Details (JSON, redacted)",
+   "reqd": 0
+  },
+  {
+   "default": "0",
+   "fieldname": "redacted",
+   "fieldtype": "Check",
+   "label": "Redacted",
+   "reqd": 0
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-09-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Erpnext AI Copilot",
+ "name": "NexMate Audit Entry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

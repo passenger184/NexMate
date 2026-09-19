@@ -1,0 +1,153 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:NMTP-{#####}",
+ "creation": "2026-09-18 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "operation",
+  "target",
+  "payload",
+  "diff_preview",
+  "reason",
+  "actor",
+  "site",
+  "correlation",
+  "expiry",
+  "preconditions",
+  "payload_hash",
+  "status",
+  "approver",
+  "executed_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "operation",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Operation",
+   "options": "code_edit\nbusiness_write",
+   "reqd": 1
+  },
+  {
+   "fieldname": "target",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Target",
+   "reqd": 1
+  },
+  {
+   "fieldname": "payload",
+   "fieldtype": "Text",
+   "label": "Payload (JSON for business write)",
+   "reqd": 0
+  },
+  {
+   "fieldname": "diff_preview",
+   "fieldtype": "Code",
+   "label": "Diff Preview (for code_edit)",
+   "options": "Diff",
+   "reqd": 0
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "reqd": 1
+  },
+  {
+   "fieldname": "actor",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Actor (user)",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "site",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Site",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "correlation",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Correlation ID",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "expiry",
+   "fieldtype": "Datetime",
+   "label": "Expiry",
+   "reqd": 1
+  },
+  {
+   "fieldname": "preconditions",
+   "fieldtype": "Text",
+   "label": "Preconditions (JSON)",
+   "reqd": 0
+  },
+  {
+   "fieldname": "payload_hash",
+   "fieldtype": "Data",
+   "label": "Payload Hash (SHA256)",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "pending\napproved\nrejected\nexecuting\nsucceeded\nfailed\ndenied\nuncertain\nreconciled\naudit_pending\nconflicting\nexpired",
+   "reqd": 1
+  },
+  {
+   "fieldname": "approver",
+   "fieldtype": "Data",
+   "label": "Approver",
+   "read_only": 1,
+   "reqd": 0
+  },
+  {
+   "fieldname": "executed_at",
+   "fieldtype": "Datetime",
+   "label": "Executed At",
+   "read_only": 1,
+   "reqd": 0
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-09-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Erpnext AI Copilot",
+ "name": "NexMate Tool Proposal",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

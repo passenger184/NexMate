@@ -328,6 +328,51 @@ dependencies are agent tooling, not application lint/typecheck tooling.
 | JavaScript lint | Not configured |
 | JavaScript typecheck | Not configured |
 
+## Durable tool execution and audit ledger — M5 cutover (operator runbook)
+
+Durable execution replaces process-local RAM proposals with Frappe-owned
+`NexMate Tool Proposal` records (DocTypes `NexMate Tool Proposal` and
+`NexMate Audit Entry`, plus `data/durable_proposals/` and `data/audit_ledger/`
+fallback for offline tests). The cutover below is an operator action from the
+repo root with the project `.venv` (never from Bench containers); it does
+not authorize a live Bench migration, restart, or production-write approval.
+
+```bash
+# 1. Verify the new DocTypes and fallback stores are present (no DB write yet)
+ls frappe_app/erpnext_ai_copilot/erpnext_ai_copilot/doctype/nexmate_tool_proposal/
+ls frappe_app/erpnext_ai_copilot/erpnext_ai_copilot/doctype/nexmate_audit_entry/
+ls tools/contracts.py  # explicit tool contracts frozen
+
+# 2. In a Bench with the app installed, migrate the DocTypes (creates tables)
+bench --site <site> migrate
+# or: bench --site <site> --force migrate  # only if the site is already on current
+
+# 3. Seed the audit ledger fallback (no production grants changed)
+#    No separate seed step is required: the ledger is append-only via
+#    proposals/audit modules. Verify fallback is writable:
+.venv/bin/python -c "from frappe_app.erpnext_ai_copilot import proposals, audit; proposals.clear_fallback(); audit.clear_fallback(); print('fallback ready')"
+
+# 4. Verify durable lifecycle offline (dotenv disabled, mocked transports):
+PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m unittest tests.test_durable tests.test_audit_ledger tests.test_debug_transparency tests.test_legacy_replacement tests.test_contracts
+# Expected: 35 tests OK (1 skipped due to dirty tree when the working tree is not clean)
+
+# 5. Legacy RAM proposals are not migrated — they become durably expired on first
+#    restart after cutover. The prior JSONL `data/erpnext_writes.jsonl` remains
+#    readable for history, not authoritative. No silent carryover.
+```
+
+Legacy RAM proposals are not imported; they are treated as `expired` and
+re-proposed via the durable path, preserving the immutable-payload guarantee.
+Retention and repair are Frappe-owned: audit entries are redacted and
+retention/deletion per policy is enforced via the `NexMate Audit Entry`
+DocType; a proposal that succeeds but whose audit cannot persist is marked
+`audit_pending` and reconciled by a repair job before claiming a complete
+transaction. The confined code/Git executor remains the only path that can
+write a file and commit (root-contained, tracked-not-ignored, clean-tree,
+per-edit atomic commit for exactly the approved diff); inference never
+acquires ambient write authority. No production grants, MCP, Workbench, or
+search-engine changes are part of this cutover.
+
 Per explicit user acceptance, task 6.1 is complete with these four checks
 reported as **not configured**, not passed. Do not invent/install a tooling
 stack or request commands again for this acceptance. Syntax checks are not

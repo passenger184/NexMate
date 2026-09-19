@@ -137,7 +137,8 @@ class FrappeGatewayTest(unittest.TestCase):
         self.assertIsNone(caught.exception.__context__)
 
     def test_whitelist_is_non_guest_and_guest_refused(self) -> None:
-        self.assertEqual(self.frappe.whitelist.call_count, 4)
+        # M5 adds 7 durable/audit/Debug methods (11 total: 4 chat + 7 M5)
+        self.assertEqual(self.frappe.whitelist.call_count, 11)
         for call in self.frappe.whitelist.call_args_list:
             self.assertEqual(call, mock.call())
         self.frappe.session.user = "Guest"
