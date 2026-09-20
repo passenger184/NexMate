@@ -1,8 +1,8 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-19 — M6 `m6-open-source-packaging` complete (13/13 tasks), verified, archived as `2026-09-19-m6-open-source-packaging`. M6 **CLOSED**; no active implementation pointer remains.
+**Last updated:** 2026-09-20 — M7 `production-readiness-decision` review complete (18/18 tasks), finalized, archived. M7 **CLOSED** with final decisions: release NOT READY, production writes DENIED/PENDING (none authorized), cloud consent NO GRANT. No active implementation pointer remains.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
-**Current task:** M6 closed. Further work needs a separately approved OpenSpec change.
+**Current task:** M7 closed. Further work needs a separately approved OpenSpec change.
 
 ## 2026-09-19 m6-open-source-packaging — investigation, offline + live verification (packaging, 13/13 tasks)
 

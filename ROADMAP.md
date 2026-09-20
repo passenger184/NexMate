@@ -24,6 +24,10 @@ M5 `durable-tool-execution-audit` is complete: implemented (20/20 tasks), harden
 
 M6 `m6-open-source-packaging` is complete and formally closed: implemented (13/13 tasks), verified, and archived as `2026-09-19-m6-open-source-packaging`. Verified result only: **Option A preserved the monorepo** (no move, no shim); `apps.json` uses `directory: frappe_app` (plain root-level `bench get-app` does not discover the monorepo — proven by `FileNotFoundError: setup.py` on bench 5.31.0); fresh test-site installation/migration verified on site `test-fresh-clone` (bench 5.31.0, Frappe 16.31.0, app 0.1.0, `migrate` exit `0`); 4 NexMate DocTypes and 4 tables verified with initial counts `0`; imports verified without the repository root on `PYTHONPATH` (offline isolated subprocess + installed-path import); existing tests (`330` Python `OK (1 skipped)`, `67` Node PASS) and strict OpenSpec validation passed. The frontend/shared site was read only, never migrated; no production deployment was performed or claimed. No active implementation pointer remains: further work needs a separately approved OpenSpec change.
 
+## M7 CLOSED — 2026-09-20
+
+M7 `production-readiness-decision` is complete and formally closed: review executed (18/18 tasks), finalized, archived. Final decisions on collected evidence only: release NOT READY, production writes DENIED/PENDING (none authorized), private-data cloud/provider consent NO GRANT — recorded separately with no inheritance between them. Evidence: VL-judge re-score of recorded 2026-08-24 samples (26/45 valid; precision n=1 unusable; NOT held-out), authoritative live NLU matrix 25/29 with 4 named mismatches kept as findings, ERPNext populated-data retrieval unverified, U1–U10 unresolved where found unresolved, O1 staging-only, O5 local-only, O2/O3/O4 unagreed, MCP/Workbench/alternate-search deferred. Staging-continue posture unchanged; no production deployment, write approval, or cloud grant claimed or given. No active implementation pointer remains: further work needs a separately approved OpenSpec change.
+
 ## Historical Phase 1–8 acceptance
 
 Evidence is dated in `progress/CURRENT.md` and `progress/JOURNAL.md`.
