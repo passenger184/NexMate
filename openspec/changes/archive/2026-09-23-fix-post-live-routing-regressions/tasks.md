@@ -21,3 +21,10 @@ Planning only — no implementation started. Each task states its verification i
 - [x] 3.1 Run the full offline suite (`python -m unittest discover -s tests`) plus the `node` harness and `node --check` on the bundle, and verify zero regressions versus the `9f274ed` baseline (record counts; `test_routing_eval` dataset green with `evaluation/routing_cases.json` unmodified).
 - [x] 3.2 Audit the diff for scope compliance (only `orchestrator.py` + routing tests changed; no `service/`, `rag/`, `tools/`, `config.py`, `frappe_app/`, specs, `.env`, index, tenancy, ACL, deployment, packaging, write-path, or M7-archive files; no `~/projects/frappe_docker` access at any point) via `git status --short` and `git diff --stat`, and verify `git diff --check` is clean with no commit created.
 - [x] 3.3 Confirm prompt-wording review is recorded, the deferred live 29-case re-run is handed off as a separately-authorized checkpoint, and no live model/service call occurred in planning or implementation beyond the authorized offline suite (which mocks all transports).
+
+## Closure evidence — authorized live validation 2026-09-23 (commit `ee8b0de`)
+
+- Model `qwen2.5-coder:7b` digest `dae161e27b0e` at `http://172.30.224.1:11434`; dataset `evaluation/routing_cases.json` unmodified; staging ERPNext unreachable (read branch to lookup-failure only, not a routing failure).
+- Result **28/29, 0 harness errors**: `knowledge-journal`→RAG, `followup-purchase`→RAG, dead-port probe→safe `clarify`/`degraded` with no exception; `code-where`/`ambiguous-payments`/`contam-newtopic` fixes intact; employee probes 2/2 pass.
+- Sole non-pass: `bye` ("see you later", two unparseable NLU outputs → safe degraded clarify; model-output variance across three runs, not a demonstrated routing regression; not relabeled fixed).
+- This record is routing evidence only: no production-readiness, write, cloud, U/O, or threshold implication; M7 remains authoritative. Raw artifacts: `/tmp/live29/live29_ee8b0de.json`, `probes_ee8b0de.json`, `manifest_ee8b0de.json` (outside the repo by procedure).
