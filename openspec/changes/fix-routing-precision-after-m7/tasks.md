@@ -1,0 +1,23 @@
+# Tasks: fix-routing-precision-after-m7
+
+Planning only — no implementation started. Each task states its verification inline. Live 29-case re-evaluation is explicitly NOT part of this change (later checkpoint).
+
+## 1. Failing-first regression tests (no source changes yet)
+
+- [x] 1.1 Add heuristic unit tests proving the current gaps: "where is Sales Invoice implemented" (plus paraphrases "where is Purchase Invoice implemented", "which function implements the pathsafe check") returns `None` today instead of `code`, and "How do I create a Purchase Invoice?" / "How do I submit a Purchase Order?" return `None` today instead of `rag`, and verify the new tests FAIL against the unmodified `orchestrator.py`.
+- [x] 1.2 Add `handle_question` replay tests that script NLU per `evaluation/routing_cases.json` and mock `generator._complete` to return the live-observed wrong classifier verdicts (`code-where`→`{"route":"rag"}`; `followup-purchase`/`ambiguous-payments`/`contam-newtopic`→`{"route":"erpnext"}`) while exercising the REAL `decide_route` (no `decide_route` mock), and verify all four tests FAIL with the current routes before any fix.
+- [x] 1.3 Add bare-noun guard tests: `handle_question("payments")` (and variant "invoices") with NLU mocked as `task` (replaying the live misclassification) routes `clarify` with `fallback == "clarify"` and zero retrieval/tool calls, and verify these tests FAIL against the unmodified code.
+- [x] 1.4 Add no-regression tests locking current correct behavior: `live-count` ("how many purchase invoices are submitted") and `degraded-strong` ("how many users are there in our erpnext instance") still route `erpnext`; "How is a DocType implemented in Frappe?" stays `rag` (not stolen by the code-location pattern); canonical exact fast-paths ("hi", "help") unchanged; and verify they PASS before the fix (baseline guards).
+
+## 2. Deterministic router fix (implementation, `orchestrator.py` only)
+
+- [x] 2.1 Generalize the code-location signal beside `_CODE_HINTS` (`orchestrator.py:479-484`) into a pattern family (location interrogative + implement*: where-is-X-implemented, which-file/function-implements-X) wired into `_heuristic_route` (`:487-504`), and verify task 1.1's code-location cases now return `("code", "heuristic")` with no exact-string literals for the four case IDs in the diff.
+- [x] 2.2 Add the how-to `rag` arm to the task router: how-to framing ("how do I / how to / how can I …") with NO live-data/code signal present returns `("rag", "heuristic")`, evaluated after the erpnext and code arms, and verify task 1.1's how-to cases plus the `followup-purchase`/`contam-newtopic` replay tests in 1.2 now pass while 1.4's live-data cases still route `erpnext`.
+- [x] 2.3 Add the deterministic bare-noun clarify guard for NLU-`task` verdicts (short verbless-fragment input with a `task` verdict and no exact-conversational match → `_clarify_result` before condensation, heuristic, classifier, or extraction; non-task verdicts and the degraded path are untouched), and verify task 1.3 now passes and `ambiguous-invoices` ("invoices") behavior is unchanged `clarify`.
+- [x] 2.4 Reinforce `_NLU_PROMPT` (`orchestrator.py:190-219`) clarify boundary (bare topic words/fragments → `clarify`, never `task` on confidence alone) and `_CLASSIFIER_PROMPT` (`:523-534`) four-way boundary (HOW-TO→rag with DocType-noun-alone-is-not-live-data negatives; LIVE-DATA markers→erpnext; implementation-location→code), keeping heuristic→classifier→default-`rag` shape, and verify `git diff` shows prompt + signal changes only in `orchestrator.py`.
+
+## 3. Offline verification and scope audit (no new behavior)
+
+- [x] 3.1 Run the full offline suite (`python -m unittest discover -s tests`) plus the `node` harness and `node --check` on the bundle, and verify zero regressions versus the pre-change baseline (record counts, including the previously-passing `test_routing_eval` dataset which must stay green with `evaluation/routing_cases.json` unmodified).
+- [x] 3.2 Audit the diff for scope compliance (only `orchestrator.py` + routing tests changed; no `service/`, `rag/`, `tools/`, `config.py`, `frappe_app/`, specs, `.env`, index, tenancy, ACL, deployment, packaging, or write-path files; no `~/projects/frappe_docker` access at any point) via `git status --short` and `git diff --stat`, and verify `git diff --check` is clean.
+- [x] 3.3 Record dated offline evidence (test counts, the four fixed routes with paraphrase variants, 1.4 no-regression results) and hand off the deferred live 29-case re-run as a separately-authorized checkpoint with explicit environment/provider/model/dataset identification, and verify no live model/service call occurred in this change.

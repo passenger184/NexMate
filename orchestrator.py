@@ -199,9 +199,10 @@ chit-chat with no request. subtype: greeting|thanks|goodbye|ack.
 for help in general. subtype: null.
 - "troubleshoot": something is broken, failing, or behaving unexpectedly \
 and needs diagnosis. subtype: null.
-- "clarify": too vague to act on — a bare topic word ("invoices"), a \
-fragment, or a request missing the details needed to proceed. subtype: \
-null.
+- "clarify": too vague to act on — a bare topic word ("invoices",
+"payments"), a short verbless fragment ("purchase invoices"), or a
+request missing the details needed to proceed. A bare noun without an
+action is "clarify", never "task". subtype: null.
 - "out_of_scope": clearly not about ERPNext/Frappe, this project's code, \
 or using the assistant (weather, jokes, sports, general trivia). \
 subtype: null.
@@ -483,24 +484,106 @@ _CODE_HINTS = (
     "which function implements", "in tools/", "in rag/", "in service/",
 )
 
+# Generalized implementation-location shapes (interrogative + implementation
+# verb over ANY subject — never a subject list). "where is Sales Invoice
+# implemented" and "which function implements the pathsafe check" share
+# the shape; the old literal "where is it implemented" above is subsumed
+# but kept for its exact-substring value.
+_CODE_LOCATION_RES = (
+    re.compile(r"\bwhere\s+is\b.*\bimplemented\b"),
+    re.compile(r"\bwhere\s+is\s+the\s+code\s+for\b"),
+    re.compile(r"\bwhich\s+(file|files|function|functions|method|methods|"
+               r"module|modules|class|classes)\b.*\bimplement"),
+)
+
+
+def _is_code_location(lowered: str) -> bool:
+    """True for implementation-location questions about any subject."""
+    return any(rx.search(lowered) for rx in _CODE_LOCATION_RES)
+
+
+# Single markers strong enough to establish live-data intent alone (each
+# is itself an ERPNext signal: counts, schema/field lists, a status
+# question). A bare business noun never appears here.
+_EXPLICIT_LIVE_SINGLE = (
+    "how many",
+    "count of",
+    "schema of",
+    "what fields does",
+    "which fields does",
+    "what is the status of",
+)
+
+
+def _is_explicit_live_lookup(lowered: str) -> bool:
+    """True for unambiguous live-data lookups needing no corroboration."""
+    if any(h in lowered for h in _EXPLICIT_LIVE_SINGLE):
+        return True
+    # Imperative display verb paired with submitted-state language:
+    # "show me submitted Purchase Invoices" asks for records, while
+    # "show me the project structure" (no state language) does not.
+    if re.search(r"\b(show|list|display)\b", lowered) and (
+            "submitted " in lowered or "docstatus" in lowered):
+        return True
+    return False
+
+
+# How-to/documentation framing ("how do I …", "how to …"). Framing only:
+# operation words (create, submit, configure…) inside such a question do
+# not imply live data. Evaluated after the erpnext/code arms, so explicit
+# live-data or code signals always win over framing.
+_HOWTO_RE = re.compile(r"\bhow\s+(do|does|did|can|could|should|would|to)\b")
+
+
+def _is_howto(lowered: str) -> bool:
+    """True for how-to/documentation framing."""
+    return bool(_HOWTO_RE.search(lowered))
+
+
+# Insufficient-input guard: at most two tokens and no interrogative,
+# auxiliary, or intent verb. General English function vocabulary only —
+# never business nouns. "payments" and "purchase invoices" share the
+# shape; "show invoices" and "how many users" carry intent and pass.
+_BARE_MAX_TOKENS = 2
+_GUARD_SKIP_WORDS = frozenset(
+    "how what where which who why when can could should would will "
+    "do does did is are was were be been have has had may might must "
+    "shall show list tell give find get create submit make open check "
+    "explain describe add update fix see try use help".split()
+)
+
+
+def _is_bare_fragment(question: str) -> bool:
+    """True for short verbless fragments lacking actionable intent."""
+    tokens = re.findall(r"[a-z0-9]+", question.lower())
+    if not tokens or len(tokens) > _BARE_MAX_TOKENS:
+        return False
+    return not any(t in _GUARD_SKIP_WORDS for t in tokens)
+
 
 def _heuristic_route(question: str) -> str | None:
     """Deterministic task signals only; None when nothing fires.
 
-    Shared by decide_route (which falls through to the LLM classifier)
-    and by the degraded path when NLU classification itself fails — that
-    path may only proceed on a strong heuristic hit, never by default.
+    Precedence: explicit live-data > code/location > explicit single
+    live lookup > how-to documentation. A business noun alone never
+    routes anywhere. Shared by decide_route (which falls through to the
+    LLM classifier) and by the degraded path when NLU classification
+    itself fails — that path may only proceed on a strong heuristic
+    hit, never by default.
     """
     lowered = question.lower()
     erp_score = sum(1 for h in _ERPNEXT_HINTS if h in lowered)
     code_score = sum(1 for h in _CODE_HINTS if h in lowered)
-    if erp_score >= 2 and erp_score > code_score:
+    eff_code = code_score + (1 if _is_code_location(lowered) else 0)
+    if erp_score >= 2 and erp_score > eff_code:
         return "erpnext"
-    if code_score >= 1 and code_score > erp_score:
+    if eff_code >= 1 and eff_code > erp_score:
         return "code"
-    if erp_score >= 1 and code_score == 0 and any(
-            h in lowered for h in ("how many", "count of", "schema of")):
+    if erp_score >= 1 and eff_code == 0 \
+            and _is_explicit_live_lookup(lowered):
         return "erpnext"
+    if erp_score == 0 and eff_code == 0 and _is_howto(lowered):
+        return "rag"
     return None
 
 
@@ -527,9 +610,19 @@ schemas, field lists, document values/status, counts of records. Clues: \
 "how many", "what fields does X have", "status of", naming a concrete \
 DocType's current data.
 - "code": about THIS project repository's own source code or behavior — \
-its files, functions, why its code raises errors.
+its files, functions, why its code raises errors. Implementation-location \
+questions ("where is X implemented", "which file/function implements X") \
+are "code".
 - "rag": general ERPNext/Frappe development knowledge answerable from \
-official documentation (how-to, concepts, hooks, API usage).
+official documentation (how-to, concepts, hooks, API usage). \
+HOW-TO/documentation framing ("how do I create/submit/configure ...", \
+"how to ...") is "rag" even when it names a DocType.
+
+Decide by intent, not nouns: a business-document/DocType noun alone is \
+NOT live-data evidence, and operation words (create, submit, configure, \
+set up, update) inside a how-to question do not imply live data. \
+"erpnext" needs data-retrieval intent (counts, lists/results, status of \
+a record, field values/schema, named-record lookup, filters).
 
 Answer with ONLY a JSON object: {"route": "erpnext"|"code"|"rag"}"""
 
@@ -854,6 +947,14 @@ def _handle_question_inner(
         else:  # task
             if nlu.get("confidence", 0.0) < config.NLU_MIN_CONFIDENCE:
                 return _clarify_result(nlu.get("topic"), "classifier", chat_only)
+            if _is_bare_fragment(question):
+                # Insufficient input: a DocType/business noun alone is not
+                # evidence for any tool route. Clarify before condensation,
+                # heuristic, classifier, or extraction can act on it.
+                # Non-task verdicts never reach here, so conversational,
+                # capability, and scope handling are unaffected.
+                return _clarify_result(nlu.get("topic") or question.strip(),
+                                       "classifier", chat_only)
             if (history and nlu.get("context_dependency") == "follows_topic"
                     and nlu.get("topic")):
                 # Elliptical continuation ("what about Purchase

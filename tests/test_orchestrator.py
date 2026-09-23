@@ -178,7 +178,11 @@ class HandleQuestionRouting(unittest.TestCase):
         self.assertIn("VERSION LINE",
                       gen.call_args.kwargs.get("extra_system", ""))
 
-    def test_low_confidence_rag_refuses_without_llm_answer(self) -> None:
+    def test_bare_fragment_clarifies_before_rag_answer(self) -> None:
+        # "vague thing" is a short verbless fragment, so the bare-fragment
+        # guard clarifies before the RAG branch runs: generation never
+        # executes and confidence stays low. Assertions unchanged — only
+        # the path (guard, not the RAG confidence gate) is new.
         fake_chunk = {"title": "T", "section": "s",
                       "url_or_path": "u", "source_type": "public_doc",
                       "score": 0.75, "text": "x"}
@@ -344,9 +348,12 @@ class ExtractionNameValidationTest(unittest.TestCase):
 
 
 class UnknownDoctypeTest(unittest.TestCase):
-    # "invoices" -> extractor guesses DocType "Invoices" -> Frappe answers
-    # 404 "DocType Invoices not found". That 404 must surface as a plain
-    # naming explanation, never a raw error dump and never an answer.
+    # A plural DocType guess ("show invoices for review" -> extractor
+    # guesses DocType "Invoices") meets Frappe's 404 "DocType Invoices not
+    # found". That 404 must surface as a plain naming explanation, never a
+    # raw error dump and never an answer. (Bare "invoices" alone now
+    # clarifies before the branch via the bare-fragment guard; this probe
+    # carries intent verbs so it still reaches the branch under test.)
     TASK_NLU = {"kind": "task", "subtype": None, "topic": "invoices",
                 "context_dependency": "none", "confidence": 0.9}
     FRAPPE_404 = ('["{\\"message\\":\\"DocType Invoices not found\\",'
@@ -354,16 +361,16 @@ class UnknownDoctypeTest(unittest.TestCase):
 
     def _run(self, exc):
         with mock.patch.object(orchestrator, "_understand_with_llm",
-                               return_value=dict(self.TASK_NLU)), \
+                                return_value=dict(self.TASK_NLU)), \
                 mock.patch.object(orchestrator, "decide_route",
-                                  return_value=("erpnext", "classifier")), \
+                                   return_value=("erpnext", "classifier")), \
                 mock.patch.object(
                     orchestrator, "_extract_erpnext_request",
                     return_value={"op": "list", "doctype": "Invoices",
                                   "limit": 20}), \
                 mock.patch.object(orchestrator.erpnext, "list_documents",
                                   side_effect=exc):
-            return orchestrator.handle_question("invoices")
+            return orchestrator.handle_question("show invoices for review")
 
     def test_unknown_doctype_404_names_the_bad_name(self) -> None:
         out = self._run(orchestrator.erpnext.ErpnextApiError(
