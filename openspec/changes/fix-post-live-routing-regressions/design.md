@@ -1,0 +1,35 @@
+# Design: fix-post-live-routing-regressions
+
+## Context
+
+See `proposal.md` — Why. Baseline is commit `9f274ed` (clean tree verified). Live facts from `/tmp/live29/`: `knowledge-journal` and `followup-purchase` returned NLU `clarify` (0.9/0.8) with zero downstream calls, so neither condensation, heuristic, nor classifier engaged; the dead-port probe escaped `APIConnectionError` from `rag/generator.py:297 generate_answer` via `_handle_question_inner` (`orchestrator.py:1074`) after degraded routing took the new how-to `rag` arm. Pre-fix degraded code (`M7` era) returned clarify for the same input because the heuristic abstained. The `/orchestrate` handler (`service/main.py:661`) has no guard around `handle_question`, so the exception surfaces as HTTP 500 instead of a safe degraded answer. No existing test pins `generate_answer`-raises behavior.
+
+## Goals / Non-Goals
+
+**Goals:** the three demonstrated regressions corrected through generalized, offline-provable rules; all prior-fix successes preserved; every new test fails on `9f274ed` and passes after.
+
+**Non-Goals:** no new router/agent/model/provider; no orchestrator or RAG redesign; no threshold, readiness, write, consent, U/O, MCP, Workbench, tenancy, ACL, deployment, or packaging change. `evaluation/routing_cases.json` untouched; live re-run is a later checkpoint.
+
+## Decisions
+
+- **D1 — Narrow the NLU clarify wording (supporting, not primary proof).** Remove the noun-topic examples (`"invoices"`, `"payments"`, `"purchase invoices"`) and the absolute "never task" sentence; scope the bullet to single bare words / short verbless fragments with no question structure. Rationale: prompt examples act as attractors for small models, and the verbatim "purchase invoices" example collides with the `followup-purchase` input — the leading (unstated-as-proven) suspect for both NLU over-clarifications. The deterministic guard already owns the bare-fragment boundary for `task` verdicts, so the prompt no longer needs to. Alternative (leave wording, rely on backstop D2 alone): rejected — the wording is the suspected cause; keeping a known attractor while armoring around it invites the next collision. Verification is wording review now, live re-run later (prompt text assertions are deliberately not added as tests).
+- **D2 — Complete-interrogative backstop for `clarify` verdicts (primary, offline-provable).** In the `kind == "clarify"` dispatch, before returning: if the message is a complete interrogative (leading interrogative/auxiliary + auxiliary verb present + more than two tokens), fall through to the normal task pipeline with the verdict's confidence intact. Rationale: a complete question carries sufficient intent to *attempt* routing; every downstream gate (NLU confidence, bare guard, retrieval confidence, classifier) still applies, and low-confidence clarifies are preserved by the existing gate. Generalized syntax — no nouns, no "journal entry" special case: "what is a journal entry?", "What is a sales invoice?", "How does purchase invoice work?" all share the shape, while "payments", "purchase invoices", "invoices??", and "Something vague" do not. Alternative (prompt-only fix): rejected — unprovable offline and already tried once.
+- **D3 — Elliptical clarify-with-history attempts condensation (existing architecture).** After D2, for remaining `clarify` verdicts: if history is non-empty and the message is continuation-shaped (leading "what about / and / how about / what if" or anaphoric reference per existing `has_anaphora_reference`), attempt `condense_followup`; on a non-empty rewrite, set the refined question and enter the normal task pipeline (confidence gate applies as usual); on failure/None, or with no history, clarify exactly as today. Rationale: reuses the architected resolver instead of discarding resolvable context; "what about purchase invoices?" condenses to a how-to rewrite that the proven how-to arm routes to RAG (the `followup-recon` live precedent). New topics are unaffected (no history → immediate clarify; `context_dependency: none` + complete shape → D2 path). Alternative (bare-guard exemption for follows_topic): rejected — weaker and blind to condensation quality.
+- **D4 — Explicit live-data follow-ups flow through unchanged precedence.** The condensed question enters the *normal* pipeline, so "what about Purchase Invoice status?" reaches ERPNext only if its rewrite carries explicit data signal (e.g. "what is the status of …" via `_is_explicit_live_lookup`); otherwise how-to framing wins as before. Rationale: no parallel routing logic, hence no new over-routing surface — the same gates that fixed the M7 over-routing judge every condensed question. Tests pin both legs (status rewrite → erpnext with extraction mocked; how-to rewrite → rag with ERPNext tools asserting silence).
+- **D5 — Degraded branch excludes the `rag` arm (minimal containment).** In the `nlu is None` branch, treat a `"rag"` heuristic result as non-proceeding (same as `None`) → `_clarify_result(degraded)`. Rationale: degraded means the provider may be down, and the RAG branch's generation step is provider-dependent with no containment — restoring the exact pre-fix degraded semantics. Model-present `decide_route` keeps the arm untouched. Alternative (try/except around RAG generation): rejected for now — broader fail-loud contract change; recorded as a deferred option if provider-mid-outage containment is ever required. Existing `DegradedNluTest` expectations are preserved verbatim and extended with a how-to case.
+- **D6 — No `config.py` changes.** Thresholds, timeouts, and hint-tuple placement stay as configured; new predicates live beside the existing ones in `orchestrator.py`.
+
+## Risks / Trade-offs
+
+- [Risk] D2 second-guesses an explicit NLU verdict → Mitigation: only complete interrogatives qualify, and the confidence gate still drops low-confidence cases to clarify; worst case is an attempted route that declines honestly at retrieval/classifier gates.
+- [Risk] D3 condenses genuinely vague follow-ups into nonsense → Mitigation: condensation failure returns clarify as today; successful rewrites still face full pipeline gates; standalone vagueness (no history) never enters this path.
+- [Risk] Prompt narrowing re-admits bare-noun `task` verdicts → Mitigation: intended and safe — the deterministic bare-fragment guard clarifies them regardless of verdict, proven by existing tests on both paths.
+- [Risk] Status-leg test depends on condenser phrasing → Mitigation: tests mock the condenser output (as existing `TopicContinuationCondenseTest` does) and assert routing *given* explicit signal, not condenser wording.
+
+## Migration Plan
+
+None — behavior-only change behind existing routes. Rollback is the pre-change tree (`9f274ed`). No data, index, config, or deployment migration. Offline suite, node harness, strict validation, `git diff --check`.
+
+## Open Questions
+
+None — expectations are pinned by `evaluation/routing_cases.json` and `/tmp/live29/` evidence; the rules above resolve the rest without new requirements.

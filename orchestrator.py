@@ -199,10 +199,9 @@ chit-chat with no request. subtype: greeting|thanks|goodbye|ack.
 for help in general. subtype: null.
 - "troubleshoot": something is broken, failing, or behaving unexpectedly \
 and needs diagnosis. subtype: null.
-- "clarify": too vague to act on — a bare topic word ("invoices",
-"payments"), a short verbless fragment ("purchase invoices"), or a
-request missing the details needed to proceed. A bare noun without an
-action is "clarify", never "task". subtype: null.
+- "clarify": too vague to act on — a single bare word or short
+verbless fragment with no question structure, or a request missing
+the details needed to proceed. subtype: null.
 - "out_of_scope": clearly not about ERPNext/Frappe, this project's code, \
 or using the assistant (weather, jokes, sports, general trivia). \
 subtype: null.
@@ -559,6 +558,47 @@ def _is_bare_fragment(question: str) -> bool:
     if not tokens or len(tokens) > _BARE_MAX_TOKENS:
         return False
     return not any(t in _GUARD_SKIP_WORDS for t in tokens)
+
+
+# Complete interrogatives: leading question word + auxiliary verb over a
+# longer message ("what is a journal entry?", "how does X work?").
+# Generalized syntax — never a subject list. A complete question carries
+# sufficient intent to attempt normal task routing even when NLU voted
+# clarify; downstream gates (confidence, retrieval, classifier) still
+# apply, and short verbless fragments never satisfy this shape.
+_QUESTION_OPENERS = frozenset(
+    "how what which why when who where can could should would will "
+    "do does did is are was were have has".split()
+)
+_AUX_VERBS = frozenset(
+    "is are was were do does did can could should would will have has "
+    "had may might must shall be been won don doesn didn isn aren "
+    "wasn weren couldn shouldn wouldn haven hasn".split()
+)
+
+
+def _is_complete_question(question: str) -> bool:
+    """True for syntactically complete interrogative questions."""
+    tokens = re.findall(r"[a-z0-9]+", question.lower())
+    return (len(tokens) > _BARE_MAX_TOKENS
+            and tokens[0] in _QUESTION_OPENERS
+            and any(t in _AUX_VERBS for t in tokens[1:]))
+
+
+# Elliptical continuations: messages that only make sense against prior
+# turns ("what about X?", "and the status?"). Generalized shape — leading
+# continuation framing or anaphoric reference, never a subject list.
+_ELLIPTICAL_OPENERS = (
+    "what about", "and about", "how about", "what if", "and what",
+    "and how",
+)
+
+
+def _is_elliptical_followup(question: str) -> bool:
+    """True for continuation-shaped messages needing history to resolve."""
+    lowered = question.strip().lower()
+    return (any(lowered.startswith(op) for op in _ELLIPTICAL_OPENERS)
+            or has_anaphora_reference(question))
 
 
 def _heuristic_route(question: str) -> str | None:
@@ -918,8 +958,12 @@ def _handle_question_inner(
         # Degraded: classification itself failed. Only a strong heuristic
         # signal may proceed to the task pipeline; otherwise clarify
         # safely instead of executing a possibly-wrong tool path.
+        # The how-to RAG arm is excluded here: with no usable NLU result
+        # the provider itself may be down, and RAG answer generation is
+        # provider-dependent — routing into it would trade a safe
+        # clarification for an uncaught provider exception.
         degraded = _heuristic_route(question)
-        if degraded is None:
+        if degraded in (None, "rag"):
             return _clarify_result(None, "degraded", chat_only)
         route, how = degraded, "degraded"
     else:
@@ -933,7 +977,27 @@ def _handle_question_inner(
         if kind == "capability":
             return _capability_result(mode, "classifier", chat_only)
         if kind == "clarify":
-            return _clarify_result(nlu.get("topic"), "classifier", chat_only)
+            if _is_complete_question(question):
+                # Complete interrogative misjudged by NLU: attempt normal
+                # task routing with all downstream gates intact (confidence,
+                # bare guard, retrieval, classifier). Telemetry above keeps
+                # the original clarify verdict.
+                kind = "task"
+            elif history and _is_elliptical_followup(question):
+                # Continuation needing history: resolve through the existing
+                # condenser, then route the rewrite normally. Failure (or an
+                # unresolvable rewrite) clarifies exactly as before.
+                condensed = generator.condense_followup(history, question)
+                if not condensed:
+                    return _clarify_result(
+                        nlu.get("topic"), "classifier", chat_only)
+                question = condensed
+                tag["refined_question"] = condensed
+                kind = "task"
+                nlu = dict(nlu, context_dependency="none")
+            else:
+                return _clarify_result(
+                    nlu.get("topic"), "classifier", chat_only)
         if kind == "out_of_scope":
             return _scope_result("classifier", chat_only)
         if kind == "troubleshoot":
