@@ -994,3 +994,121 @@ container install, `host.docker.internal:8000`, test key, roles
 
 - Single developer-mode request through `orchestrator.handle_question` at staging `http://localhost:8081` as `nexmate.integration@example.com`: "What is the customer name of the Customer named Test?" → NLU `task` 0.8 → `erpnext`/classifier (`document`/`Customer`) → `GET /api/resource/Customer/Test` 200 in 0.05s → local `ollama`/`qwen2.5-coder:7b` payload-grounded answer with `[1]` citation (`tools.erpnext://Customer/Test`). 5 local model calls (built-in retries), no cloud, no writes, no code/config/data changes. Raw artifact `/tmp/live29/orchestrated_populated_evidence.json`, run 2026-09-26T05:32:30Z.
 - Recorded in `progress/CURRENT.md` as post-M7 evidence closing the M7-era populated-retrieval gap for this capability only. Unchanged: M7 decision, normal-user Customer schema access (still 403-gated), full Developer Mode, production readiness/writes, cloud consent.
+
+## [2026-09-26] Post-M7 project-state documentation reconciliation (docs-only)
+
+OpenSpec change `reconcile-post-m7-project-state` (`skip_specs: true`, mirroring
+the archived `reconcile-architecture-and-production-hld` convention). No
+runtime code, test, model call, network request, migration, service action or
+configuration change; no ERPNext or Docker action; no out-of-scope repository
+was accessed. No commit or push.
+
+Diagnosis: `ARCHITECTURE.md` is the sole canonical HLD (`AGENTS.md`) but was
+reconciled 2026-09-17, before M2–M7 landed. Three concrete defects, plus a
+fourth discovered during this pass:
+
+- `ARCHITECTURE.md:591` classified authenticated control, isolated knowledge,
+  egress and complete audit as *"Planned; no target-boundary
+  implementation/verification claimed."* All four are implemented and
+  live-verified (M2/M4/M5).
+- `ARCHITECTURE.md:582` cited `service/session_store.py:39` as a live source
+  anchor. **That file was deleted by M3** — `service/` now contains only
+  `__init__.py`, `auth.py`, `main.py`. Verified before editing.
+- `ROADMAP.md:19` carried a live heading "Active pointer — 2026-09-19" pointing
+  at M6, contradicted by the M6/M7 CLOSED sections below it.
+- **New finding:** neither `ROADMAP.md`, `progress/CURRENT.md` nor
+  `progress/BLOCKERS.md` mentioned the two post-M7 routing changes or their
+  28/29 result. The pointer files would have left a reader believing M7's
+  historical 25/29 was still the authoritative live figure. `BLOCKERS.md` was
+  additionally dated 2026-09-17, predating M4–M7.
+
+Corrections applied:
+
+- `ARCHITECTURE.md`: header records the forward reconciliation and states
+  exactly what did and did not change; status legend gains an explicit
+  evidence-state table plus the M7 rule that live success changes evidence
+  states and never decision states; the deleted JSON-store anchor replaced with
+  M3 Frappe-owned conversation modules (historical row preserved); the single
+  "Planned" row split into four milestone-accurate rows (M2 authenticated
+  control, M3/M5 owned state + durable audit, M4 ACL/generations/egress, M6
+  packaging), each retaining its own missing-evidence list; new rows for
+  post-M7 routing stabilization (28/29, `bye` explicitly **not fixed**),
+  orchestrated populated ERPNext retrieval, and a four-way **Developer Mode**
+  distinction; stale `C`-descriptors in R04/R08/R09/R10/R12/R13/R17/R18/R19
+  brought forward; U1–U10 annotated with what M2–M5 settled versus what remains
+  undecided, with no item resolved.
+- `ROADMAP.md`: the M5→M6 section retitled as superseded history (body
+  preserved verbatim); new post-M7 stabilization section with all four routing
+  commits and the 28/29 result, explicitly keeping M7's 25/29 authoritative;
+  new post-M7 ERPNext evidence section; new "Current position" block recording
+  M2–M7 closed, no active milestone, and **no M8**.
+- `progress/CURRENT.md`: header updated; new dated routing-stabilization
+  section; the 2026-09-26 boundary paragraph extended with the four-way
+  Developer Mode distinction.
+- `progress/BLOCKERS.md`: re-dated and restructured into Governance blockers —
+  UNCHANGED / Closed evidence gaps / Still-open evidence, with the 2026-08-23
+  resolved doc-source entry preserved.
+- `progress/JOURNAL.md`: this entry.
+
+Governance deliberately unchanged: M7 remains CLOSED and authoritative; release
+NOT READY; production writes DENIED/PENDING; private-data cloud/provider
+consent NO GRANT; staging-only and local-only postures; U1–U10 all unresolved;
+O2–O4 unagreed. No U-item was marked resolved on the basis of implementation —
+the M7 rule (live success changes evidence states, never decision states) was
+applied as the governing rule, and M2–M5 mechanisms are recorded as evidence
+bearing on U4/U2/U6/U7 rather than as resolutions. No permission change was
+proposed: the normal integration user's `Customer` schema 403 is recorded as
+an upstream Frappe permission outcome, still not demonstrated. Archived M7
+artifacts, `evaluation/routing_cases.json`, `openspec/specs/`, `DECISIONS.md`
+and all runtime/test/config files were left untouched.
+
+## [2026-09-26] Post-M7 reconciliation — correction pass after pre-archive review
+
+Read-only independent pre-archive review returned **Review 1 FAIL / Review 2
+PASS** (one HIGH, three MEDIUM, four LOW documentation findings). All corrected
+in the same documentation-only change `reconcile-post-m7-project-state`. No
+governance decision, U-item, spec, runtime, test, evaluation or configuration
+artifact touched; no archive, commit or push.
+
+- **HIGH**: `ARCHITECTURE.md` §"Current runtime and request flows — C" still
+  described the pre-M2/M3/M5 architecture and contradicted the file's own
+  evidence matrix at four points (`direct fetch -> FastAPI (no incoming
+  authenticated principal)`, `localStorage: session ID + caller-selected mode`,
+  `JSON sessions on disk`, `proposals in process memory`). Rewritten as two
+  labelled paths — **A supported Desk/Frappe** and **B standalone `/ui`
+  preview (preview/legacy, not the production architecture)**. Verified the
+  orchestrator's code/ERPNext/write branches still *exist and are gated*
+  (`orchestrator.py:1038`) rather than removed, and kept them visible. The
+  adjacent `POST /tools/session/reset` row was corrected to "retired by M3" —
+  verified the route no longer exists in `service/main.py`.
+- **MEDIUM**: U-register annotation listed U6 as "untouched" in the same
+  paragraph stating M4 exercised a U6-shaped choke point; corrected to `U1, U3,
+  U5, U8, U9 and U10`, matching `design.md`. The register table is byte-unchanged
+  and U6 remains unresolved.
+- **MEDIUM**: `progress/BLOCKERS.md` did not close the base evidence its own
+  prior version listed as open. Closed-evidence section expanded with the
+  already-demonstrated M2 (Desk acceptance 12/12 + packaged bundle/CSS), M3
+  (Frappe-owned conversations), M4 (ACL/generations/egress), M5 (durable
+  proposals/audit, bounded) and M6 (monorepo packaging + fresh-site install)
+  evidence, each with an explicit `*Bounded:*` clause. No still-open item
+  removed or weakened.
+- **MEDIUM**: release-lifecycle sentence over-broadly listed package asset
+  inclusion, `app_include_js`/css build/injection, boot behavior and migrations
+  as unverified; narrowed to what remains unverified (root-repository install,
+  root-repository update parity, Bench↔Docker parity).
+- **LOW**: `service/auth.py:30` (a conversation-ID regex) and `api.py:116` (JSON
+  parsing) did not point at authentication logic — replaced with verified
+  `service/auth.py:119` (`ServiceAuthMiddleware`) and
+  `frappe_app/erpnext_ai_copilot/api.py:67` (`_mode_for_user`). Developer Mode
+  anchor moved from the `chat_only` parameter (`:892`) to the enforcement point
+  (`orchestrator.py:1038`). `0 blocked` removed everywhere — the repository
+  defines no such metric (`routing_cases.json` has no `blocked` field; archived
+  evidence says "28/29, 0 harness errors"). Added the caveat that staging ERPNext
+  was unreachable during the 2026-09-23 routing run, affecting the read
+  branch/lookup availability and not the routing verdict.
+- **Disclosed, not silently retained**: several pre-existing `service/main.py`
+  line anchors in the "Legacy and direct endpoints" table have drifted since the
+  2026-09-17 pass. Re-anchoring all of them was outside this pass, so an explicit
+  anchor caveat was added to that table; the endpoint *names* were re-verified.
+- Anchors introduced or repointed in this pass were each verified against source
+  before use; all 15 resolve to the claimed code.

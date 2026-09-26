@@ -16,9 +16,14 @@ Current scope is one project. Shared multi-workspace routing, MCP and the
 separate Developer Workbench remain deferred. Site-isolated private
 knowledge is an approved target, not a selected shared-tenancy mechanism.
 
-## Active pointer — 2026-09-19
+## Historical pointer — M5 closure, 2026-09-19 (superseded)
 
-M5 `durable-tool-execution-audit` is complete: implemented (20/20 tasks), hardened (fail-closed, owner-only, hash pre/site, Frappe ORM business-write, app-local code root), offline-verified (`330` Python tests `OK (1 skipped)`, `67` Node PASS, `7` specs + `1` change `strict PASS`), live-verified (Frappe M5 tables created via `bench --site frontend migrate` exit `0`, `tabNexMate Tool Proposal`/`Audit Entry` `0` rows, DocType authority with naive UTC, mock execution `succeeded` + `audit_pending`/`read-back`), archived, and committed as `ba220a8` (M5 offline) plus hardening (this commit) on `origin/main`. Per user direction the active pointer advances to **M6 — Release and deployment parity** (packaging/installation direction: R04–R07, R10). This pointer authorizes no implementation: M6 needs a separately approved OpenSpec change with its own requirements, design, and acceptance evidence. M4 delivered ACL/generations/egress; M5 delivered durable proposals, audit ledger, and filtered Debug. Remaining limitations: live cross-worker concurrency, live second-actor, live business-write, live uncertain/reconcile, and `frappe_app/` subdirectory packaging are documented as future verification/packaging work.
+> This section records the M5 → M6 decision as it was made. It is **history,
+> not an active pointer**: M6, M7 and the post-M7 work below have all since
+> closed. It is retained verbatim for provenance. The current position is the
+> "Current position" section above.
+
+M5 `durable-tool-execution-audit` is complete: implemented (20/20 tasks), hardened (fail-closed, owner-only, hash pre/site, Frappe ORM business-write, app-local code root), offline-verified (`330` Python tests `OK (1 skipped)`, `67` Node PASS, `7` specs + `1` change `strict PASS`), live-verified (Frappe M5 tables created via `bench --site frontend migrate` exit `0`, `tabNexMate Tool Proposal`/`Audit Entry` `0` rows, DocType authority with naive UTC, mock execution `succeeded` + `audit_pending`/`read-back`), archived, and committed as `ba220a8` (M5 offline) plus hardening (this commit) on `origin/main`. Per user direction the active pointer advanced to **M6 — Release and deployment parity** (packaging/installation direction: R04–R07, R10). That pointer authorized no implementation: M6 needed a separately approved OpenSpec change with its own requirements, design, and acceptance evidence. M4 delivered ACL/generations/egress; M5 delivered durable proposals, audit ledger, and filtered Debug. Remaining limitations: live cross-worker concurrency, live second-actor, live business-write, live uncertain/reconcile, and `frappe_app/` subdirectory packaging are documented as future verification/packaging work.
 
 ## M6 CLOSED — 2026-09-19
 
@@ -27,6 +32,73 @@ M6 `m6-open-source-packaging` is complete and formally closed: implemented (13/1
 ## M7 CLOSED — 2026-09-20
 
 M7 `production-readiness-decision` is complete and formally closed: review executed (18/18 tasks), finalized, archived. Final decisions on collected evidence only: release NOT READY, production writes DENIED/PENDING (none authorized), private-data cloud/provider consent NO GRANT — recorded separately with no inheritance between them. Evidence: VL-judge re-score of recorded 2026-08-24 samples (26/45 valid; precision n=1 unusable; NOT held-out), authoritative live NLU matrix 25/29 with 4 named mismatches kept as findings, ERPNext populated-data retrieval unverified, U1–U10 unresolved where found unresolved, O1 staging-only, O5 local-only, O2/O3/O4 unagreed, MCP/Workbench/alternate-search deferred. Staging-continue posture unchanged; no production deployment, write approval, or cloud grant claimed or given. No active implementation pointer remains: further work needs a separately approved OpenSpec change.
+
+## Post-M7 stabilization — CLOSED (evidence and documentation only, 2026-09-23 → 2026-09-26)
+
+After M7 closed, four defects that M7 had recorded as live routing mismatches
+were fixed and the resulting regressions contained, via two archived
+documentation-scoped changes. These are **stabilization and evidence** work; no
+milestone was opened, no architecture or governance decision changed, and no
+new gate was passed.
+
+| Change | Implementation commit | Archive commit | Result |
+|---|---|---|---|
+| `fix-routing-precision-after-m7` | `9f274ed` | `ba51b47` → `openspec/changes/archive/2026-09-25-fix-routing-precision-after-m7/` | Live 26/29; surfaced three regressions |
+| `fix-post-live-routing-regressions` | `ee8b0de` | `4ec4463` → `openspec/changes/archive/2026-09-23-fix-post-live-routing-regressions/` | **Live 28/29** |
+
+**Final live routing evaluation (`ee8b0de` closure, 2026-09-23):** 29 total,
+**28 passed, 1 failed, 0 harness errors**; model
+`qwen2.5-coder:7b` digest `dae161e27b0e`; `evaluation/routing_cases.json`
+deliberately unmodified to preserve the M7 baseline. Staging ERPNext was
+unreachable during this run, so the ERPNext read branch returned lookup-failure;
+the archived evidence records that as a read-branch/lookup-availability
+condition, not a routing failure, and the routing verdicts stand.
+
+Resolved by these two changes: code-location question → `code`; ambiguous
+"payments" → `clarify`; unrelated new topic → `rag`; a knowledge question no
+longer becoming `clarify`; follow-up purchase → `rag`; dead-port degraded path →
+safe degraded `clarify` without entering generation.
+
+**Not fixed:** the sole remaining non-pass, `bye` ("see you later"), is repeated
+unparseable small-model NLU output. It is recorded as **model-output variance,
+not a demonstrated routing regression, and deliberately not relabeled fixed**.
+
+**Do not confuse the two figures.** M7's authoritative live matrix was
+**25/29** and remains the historical M7 record. The later 28/29 is post-M7
+stabilization evidence. Both changes state verbatim that they carry no
+production-readiness, write, cloud, U/O or threshold implication, and that
+**M7 remains authoritative**. M7's three decisions — release **NOT READY**,
+production writes **DENIED/PENDING**, private-data cloud/provider consent
+**NO GRANT** — are unchanged.
+
+## Post-M7 ERPNext evidence — recorded 2026-09-26 (no milestone)
+
+Populated ERPNext business-data retrieval was demonstrated through the real
+orchestrated path: `orchestrator.handle_question(mode="developer")` as a normal
+integration user → NLU `task` 0.8 → route `erpnext` → `GET /api/resource/Customer/Test`
+HTTP 200 (`customer_name = Test`) → payload-grounded local `qwen2.5-coder:7b`
+answer with a `[1]` citation. One GET, no writes, no code changes, no cloud.
+This closes one M7 evidence gap and is recorded in `progress/CURRENT.md`.
+
+It is **not** a Developer Mode delivery: the run exercised the inference-side
+developer path with `chat_only` at its default `False`, while the Desk gateway
+hard-codes `"execution_scope": "chat-only"`. Desk-facing Developer Mode,
+permission parity with the incoming Desk identity (**U5**) and the normal
+integration user's `Customer` schema access (403) all remain unproven.
+
+## Current position — 2026-09-26
+
+- **M2, M3, M4, M5, M6 and M7 are all CLOSED.** No milestone is active.
+- **No active OpenSpec change exists.** `openspec/changes/` contains only
+  `archive/`.
+- **No M8 exists and none is implied.** No new implementation milestone has been
+  approved or authorized.
+- Work since M7 has been **evidence and documentation stabilization** only.
+- Any future implementation work requires a **separately approved OpenSpec
+  change** with its own requirements, design, tasks and acceptance evidence.
+- Blocking the next gate are the unresolved register items **U1–U10** and the
+  unagreed thresholds **O2–O4**, all recorded in `ARCHITECTURE.md` and
+  `progress/BLOCKERS.md`. None is resolved.
 
 ## Historical Phase 1–8 acceptance
 

@@ -1,14 +1,38 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-20 — M7 `production-readiness-decision` review complete (18/18 tasks), finalized, archived. M7 **CLOSED** with final decisions: release NOT READY, production writes DENIED/PENDING (none authorized), cloud consent NO GRANT. No active implementation pointer remains. 2026-09-26 post-M7 populated-retrieval evidence recorded below; M7 decision unchanged.
-**Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
-**Current task:** M7 closed. Further work needs a separately approved OpenSpec change.
+**Last updated:** 2026-09-26 — documentation reconciliation of post-M7 project state completed under the documentation-only OpenSpec change `reconcile-post-m7-project-state`. M7 **CLOSED** with final decisions: release NOT READY, production writes DENIED/PENDING (none authorized), cloud consent NO GRANT. No active implementation milestone and no M8. `ARCHITECTURE.md` reconciled forward to delivered M2–M6 plus the two post-M7 routing changes.
+**Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; M2–M7 closed; no new phase or production-readiness acceptance.
+**Current task:** None active. Work since M7 has been evidence and documentation stabilization only. Further implementation work needs a separately approved OpenSpec change.
+
+## 2026-09-26 Post-M7 routing stabilization — DEMONSTRATED (28/29 live)
+
+Two documentation-scoped OpenSpec changes fixed the four live route defects M7 had recorded, then contained the three regressions the first fix introduced. No milestone was opened; no architecture, governance or scope decision changed.
+
+| Change | Implementation | Archive | Live result |
+|---|---|---|---|
+| `fix-routing-precision-after-m7` | `9f274ed` | `ba51b47` → `archive/2026-09-25-fix-routing-precision-after-m7/` | 26/29 (surfaced 3 regressions) |
+| `fix-post-live-routing-regressions` | `ee8b0de` | `4ec4463` → `archive/2026-09-23-fix-post-live-routing-regressions/` | **28 passed, 1 failed, 0 harness errors** |
+
+Final live evaluation 2026-09-23: model `qwen2.5-coder:7b` digest `dae161e27b0e`; `evaluation/routing_cases.json` deliberately unmodified to preserve the M7 baseline. Staging ERPNext was unreachable during that run, so the ERPNext read branch returned lookup-failure; the archived evidence records this as a read-branch/lookup-availability condition, **not** a routing failure, and the routing verdicts stand. Resolved: code-location → `code`; ambiguous "payments" → `clarify`; unrelated new topic → `rag`; a knowledge question no longer becoming `clarify`; follow-up purchase → `rag`; dead-port degraded path → safe degraded `clarify` without entering generation.
+
+**Not fixed:** the sole remaining non-pass, `bye` ("see you later"), is repeated unparseable small-model NLU output — recorded as **model-output variance, not a demonstrated routing regression, and deliberately not relabeled fixed**.
+
+**Do not confuse the two figures.** M7's authoritative live matrix was **25/29** and remains the historical M7 record. The 28/29 above is post-M7 stabilization evidence. Both archived changes state verbatim that they carry no production-readiness, write, cloud, U/O or threshold implication, and that **M7 remains authoritative**.
 
 ## 2026-09-26 Post-M7 orchestrated populated ERPNext retrieval — DEMONSTRATED
 
 Post-M7 staging evidence (not an M7 re-run; M7's "not demonstrated" record stands as history). Single user-level request through `orchestrator.handle_question` (developer mode) at staging `http://localhost:8081` as normal integration user `nexmate.integration@example.com` (no admin credential, no credentials recorded): "What is the customer name of the Customer named Test?" → NLU `task` 0.8 → route `erpnext` (classifier, `{op: document, doctype: Customer}`) → `GET /api/resource/Customer/Test` 200 in 0.05s (`customer_name = Test`) → payload-grounded local generation (`ollama`/`qwen2.5-coder:7b`, 5 local calls incl. built-in retries, no cloud) → "The customer name of the Customer named Test is Test. [1]" with source `tools.erpnext://Customer/Test`. Total 45.2s (model retries+generation; retrieval fast). No writes, no permission/data changes, no code changes. Raw artifact `/tmp/live29/orchestrated_populated_evidence.json` (outside repo by procedure); run timestamp 2026-09-26T05:32:30Z.
 
 Boundary (unchanged elsewhere): populated business-data retrieval through orchestrator is now demonstrated; administrator-only Customer schema (87 fields) demonstrated separately; Customer schema with the normal integration user remains not demonstrated (previously 403); full Developer Mode, production readiness, production writes, and cloud consent are unchanged; M7 remains authoritative.
+
+**Developer Mode — four separate claims, do not conflate them.** The 2026-09-26 run used `orchestrator.handle_question(..., mode="developer")` with inference-side `chat_only=False`, which **bypasses** the Desk gateway's hard-coded `"execution_scope": "chat-only"` (`frappe_app/erpnext_ai_copilot/api.py:236`).
+
+1. *Inference-side developer capability* — **demonstrated** 2026-09-26 (the ERPNext branch routed a real user question).
+2. *Desk-facing Developer Mode experience* — **not demonstrated**; the Desk gateway denies code and ERPNext dispatch in **both** personas.
+3. *Permission parity with the incoming Desk identity* — **unresolved**; the ERPNext client uses one configured shared upstream account (`tools/erpnext.py:46`), not the requesting user. M4 shipped coarse retrieval tiers by intent; **U5 remains open**.
+4. *Developer Workbench* — **deferred** (R20, no implementation milestone).
+
+No permission change is proposed or implied. The normal integration user's `Customer` schema 403 is an upstream Frappe permission outcome, recorded as still-not-demonstrated.
 
 ## 2026-09-19 m6-open-source-packaging — investigation, offline + live verification (packaging, 13/13 tasks)
 
