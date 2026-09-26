@@ -1,8 +1,14 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-20 — M7 `production-readiness-decision` review complete (18/18 tasks), finalized, archived. M7 **CLOSED** with final decisions: release NOT READY, production writes DENIED/PENDING (none authorized), cloud consent NO GRANT. No active implementation pointer remains.
+**Last updated:** 2026-09-20 — M7 `production-readiness-decision` review complete (18/18 tasks), finalized, archived. M7 **CLOSED** with final decisions: release NOT READY, production writes DENIED/PENDING (none authorized), cloud consent NO GRANT. No active implementation pointer remains. 2026-09-26 post-M7 populated-retrieval evidence recorded below; M7 decision unchanged.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; no new phase or production-readiness acceptance.
 **Current task:** M7 closed. Further work needs a separately approved OpenSpec change.
+
+## 2026-09-26 Post-M7 orchestrated populated ERPNext retrieval — DEMONSTRATED
+
+Post-M7 staging evidence (not an M7 re-run; M7's "not demonstrated" record stands as history). Single user-level request through `orchestrator.handle_question` (developer mode) at staging `http://localhost:8081` as normal integration user `nexmate.integration@example.com` (no admin credential, no credentials recorded): "What is the customer name of the Customer named Test?" → NLU `task` 0.8 → route `erpnext` (classifier, `{op: document, doctype: Customer}`) → `GET /api/resource/Customer/Test` 200 in 0.05s (`customer_name = Test`) → payload-grounded local generation (`ollama`/`qwen2.5-coder:7b`, 5 local calls incl. built-in retries, no cloud) → "The customer name of the Customer named Test is Test. [1]" with source `tools.erpnext://Customer/Test`. Total 45.2s (model retries+generation; retrieval fast). No writes, no permission/data changes, no code changes. Raw artifact `/tmp/live29/orchestrated_populated_evidence.json` (outside repo by procedure); run timestamp 2026-09-26T05:32:30Z.
+
+Boundary (unchanged elsewhere): populated business-data retrieval through orchestrator is now demonstrated; administrator-only Customer schema (87 fields) demonstrated separately; Customer schema with the normal integration user remains not demonstrated (previously 403); full Developer Mode, production readiness, production writes, and cloud consent are unchanged; M7 remains authoritative.
 
 ## 2026-09-19 m6-open-source-packaging — investigation, offline + live verification (packaging, 13/13 tasks)
 
