@@ -37,7 +37,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Action",
-   "options": "proposal_created\napproved\nrejected\nexpired\nrecheck\nrecheck_denied\nexecution_attempt\nsucceeded\nfailed\ndenied\nuncertain\nreconciled\naudit_pending\nconflicting\ndebug_view\nsecurity_event\nai_request\nretrieval\ntool_call\ntool_denied",
+    "options": "proposal_created\napproved\nrejected\nexpired\nrecheck\nrecheck_denied\nexecution_attempt\nsucceeded\nfailed\ndenied\nuncertain\nreconciled\naudit_pending\nconflicting\ndebug_view\nsecurity_event\nai_request\nretrieval\ntool_call\ntool_denied\nerpnext_read",
    "reqd": 1
   },
   {
@@ -66,7 +66,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Outcome",
-   "options": "pending\nsuccess\ndenied\nfailed\nuncertain\nreconciled\naudit_pending\nconflicting",
+    "options": "pending\nsuccess\ndenied\nfailed\nuncertain\nreconciled\naudit_pending\nconflicting\nnot_found\npermission_denied\ninvalid_request",
    "reqd": 1
   },
   {

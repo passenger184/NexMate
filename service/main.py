@@ -219,6 +219,11 @@ class OrchestrateRequest(BaseModel):
     # retrieval, never unscopable company access.
     scope: dict[str, Any] | None = None
     mode: Literal["developer", "employee"] = "developer"
+    # U5: Frappe-produced, already-authorized ERPNext business data. Inference
+    # CONSUMES this; it never authorizes it. The field is bounded and carries no
+    # credential and no authorization-subject override. It is inbound-only and is
+    # never echoed into the browser-facing response (api.RESPONSE_FIELDS).
+    authorized_context: dict[str, Any] | None = None
 
     @field_validator("question")
     @classmethod
@@ -596,9 +601,27 @@ def _erpnext_http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/tools/erpnext/schema")
+#: U5 deprecation marker for the legacy ERPNext read routes. These routes are
+#: RETAINED (not removed) but are no longer the path for authenticated user
+#: business reads, which now go through the Frappe-native authorization
+#: boundary. They remain service-authenticated and confer NO end-user
+#: authorization: reaching one proves only service access, never a user's
+#: ERPNext permission. Removal is follow-on work gated on dependency proof.
+DEPRECATED_ERPNEXT_READ_ROUTES = ("/tools/erpnext/schema", "/tools/erpnext/document", "/tools/erpnext/list")
+DEPRECATION_NOTICE = (
+    "Deprecated: authenticated ERPNext business reads are authorized by the "
+    "Frappe control plane, not by this endpoint. Service access here is not "
+    "end-user ERPNext authorization."
+)
+
+
+@app.post("/tools/erpnext/schema", deprecated=True)
 def tools_erpnext_schema(req: ErpnextSchemaRequest) -> dict:
-    """Phase 5 read-only tool: live DocType schema (fields, perms, naming)."""
+    """DEPRECATED (U5). Phase 5 read-only tool: live DocType schema.
+
+    Not the authenticated user business-read path. Retained behind the service
+    gate; carries no end-user ERPNext authorization.
+    """
     try:
         return erpnext_tool.get_doctype_schema(req.doctype)
     except (erpnext_tool.ErpnextUnavailable,
@@ -606,9 +629,13 @@ def tools_erpnext_schema(req: ErpnextSchemaRequest) -> dict:
         raise _erpnext_http_error(exc) from exc
 
 
-@app.post("/tools/erpnext/document")
+@app.post("/tools/erpnext/document", deprecated=True)
 def tools_erpnext_document(req: ErpnextDocumentRequest) -> dict:
-    """Phase 5 read-only tool: one live document by exact name."""
+    """DEPRECATED (U5). One live document by exact name.
+
+    Not the authenticated user business-read path. Retained behind the service
+    gate; carries no end-user ERPNext authorization.
+    """
     try:
         return erpnext_tool.get_document(req.doctype, req.name)
     except (erpnext_tool.ErpnextUnavailable,
@@ -616,9 +643,13 @@ def tools_erpnext_document(req: ErpnextDocumentRequest) -> dict:
         raise _erpnext_http_error(exc) from exc
 
 
-@app.post("/tools/erpnext/list")
+@app.post("/tools/erpnext/list", deprecated=True)
 def tools_erpnext_list(req: ErpnextListRequest) -> dict:
-    """Phase 5 read-only tool: filtered document list (light fields)."""
+    """DEPRECATED (U5). Filtered document list (light fields).
+
+    Not the authenticated user business-read path. Retained behind the service
+    gate; carries no end-user ERPNext authorization.
+    """
     try:
         return erpnext_tool.list_documents(
             req.doctype, filters=req.filters, fields=req.fields,
@@ -660,7 +691,8 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
 
     result = orchestrator.handle_question(
         search_question, conversation_id, history, mode=req.mode,
-        chat_only=chat_only, scope=req.scope)
+        chat_only=chat_only, scope=req.scope,
+        authorized_context=req.authorized_context)
 
     # Exchanges so far (prior pairs) plus this one; None when stateless.
     turn_count: int | None = None
@@ -684,6 +716,19 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
             "visibility": s.get("visibility") or None,
             "generation": s.get("generation") or None,
         }))
+
+    # U5: a read REQUEST is a protocol branch, not an answer. Return it
+    # directly so the Frappe control plane can authorize and execute the read.
+    # It bypasses OrchestrateResponse validation and carries no ERPNext data.
+    if "_read_request" in result:
+        logger.info(_json.dumps({
+            "request_id": request_id,
+            "conversation_id": conversation_id or "-",
+            "route": "erpnext",
+            "route_how": result.get("route_how"),
+            "outcome": "read-requested",
+        }))
+        return JSONResponse(status_code=200, content={"read_request": result["_read_request"]})
 
     route = result["route"]
     tools_used: list[str] = []

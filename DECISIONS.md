@@ -491,3 +491,65 @@ substantive user choice is discovered before dependent implementation.
 **Context:** Live Bench verification exposed two facts the plan did not foresee: (1) Frappe rolls back errored requests, so the designed orphan-turn discipline required an explicit pre-append commit; (2) stock Frappe only syncs DocType JSONs from inside module directories and requires controller stubs plus an `app_description` hook, so the app carries a real Desk-module subpackage (container-only shims documented separately for the pre-existing layout gaps).
 **Alternatives considered:** Accepting rollback (loses the documented orphan-turn guarantee); soft-close instead of delete-by-owner (deferred — no retention policy gives "closed" meaning); bulk-importing JSON sessions (rejected — fabricates ownership).
 **Consequences:** Trust boundary from the review stands (Frappe authoritative; inference never authorizes ownership; privileged roles cannot bypass API owner checks; concurrent appends serialize under row locks with loud conflicts). `ARCHITECTURE.md` still describes the JSON store — left for a separate HLD reconciliation. No production readiness, ACL retrieval, streaming, or successor work is authorized by this entry.
+
+## [2026-09-27] U5 frappe-native-authorized-erpnext-reads: architecture decision
+
+**Decision:** All user-facing ERPNext business-data reads execute inside the
+authenticated Frappe request process using Frappe's native permission-aware
+ORM. The sole authorization subject is `frappe.session.user`. The separate
+FastAPI inference service no longer queries ERPNext for those reads and no
+longer holds the shared ERPNext credential for that purpose. Inference may
+*request* a read but cannot authorize or execute one. Effective access is
+`Frappe authorized ∩ NexMate allowed`; NexMate may narrow, never widen. Mode
+(`developer`/`employee`) is unchanged and is explicitly **not** ERPNext
+authorization — both modes read through the same boundary as the same user.
+Schema/metadata access is outside this decision and stays on the retained
+legacy client under its existing per-mode policy. Multi-site routing is
+explicitly deferred to U1.
+
+**Why this shape, given the ContextVar boundary:** `frappe.session.user` is
+held in a `ContextVar` and is genuinely unbound outside a Frappe request.
+Neither per-user credentials nor an externally recreated capability envelope
+can carry or verify that identity across a process boundary, so both leave the
+authorization subject asserted rather than derived.
+
+**Alternatives rejected:**
+- *Model B — per-user ERPNext API credentials.* Expands secret distribution
+  from one integration account to one per human user, still executes reads
+  outside the Frappe request process, and still requires inference to trust an
+  asserted subject. It also has no available credential store in the target
+  environment (no readable API-key DocType in Frappe 16.31.0).
+- *Model C — externally recreated capability/permission envelopes.* Requires
+  re-implementing Frappe's permission semantics outside Frappe, where six
+  concrete footguns were identified (`Query` defaults `ignore_permissions=True`;
+  `get_all` sets it; `flags.ignore_permissions` voids document checks; the owner
+  constraint and User Permissions are `if/elif` so they do not compose; shared
+  documents are OR-ed on top of all restrictions; and field-level `permlevel`
+  enforcement is a separate explicit step absent from `get_doc`). Field-level
+  `permlevel` behaviour was not resolvable without live evidence. Recreating
+  that engine is a larger and more dangerous surface than invoking it in place.
+
+**Measured motivating evidence (read-only, test site):** the shared credential
+authenticates as a single non-Administrator account with 14 broad roles,
+permitted to read 35 DocTypes including `Bank Account`, `GL Entry`,
+`Journal Entry`, `Payment Entry`, `Employee`, `Timesheet`, `User`, `File` and
+`Communication`, and denied `DocType`, `Role`, `Salary Slip` and the
+access/audit logs. A NexMate user with no ERPNext read right received that
+account's data.
+
+**Consequences and limits.** This substantially reduces inference-side ERPNext
+authority and blast radius for business reads. It does **not** reduce
+inference-side ERPNext risk to zero: the shared credential is deliberately
+retained for the enumerated version-lookup and legacy-write consumers, so it is
+not removed from the inference environment. No production readiness, release,
+production-write or cloud/provider consent is granted or implied, and the M7
+`production-readiness-decision` remains authoritative and closed. Full
+intra-site ACL parity is still not delivered: this change governs ERPNext
+**business-record** reads, not knowledge-corpus retrieval ACL.
+
+**Provenance:** approved by the project owner as a recorded architectural
+decision, implemented under the OpenSpec change
+`frappe-native-authorized-erpnext-reads`. Implementation and offline
+verification only; the live two-user authorization evidence and the audit
+DocType migration are separately approval-gated and not authorized by this
+entry.

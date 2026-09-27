@@ -88,12 +88,20 @@ class FrappeGatewayTest(unittest.TestCase):
         self.frappe.delete_doc = mock.Mock()
         self.frappe.db = mock.Mock()
         self.conversations = self.load_module("conversations")
+        # U5: the gateway imports the Frappe-native read adapter alongside
+        # conversations. Load the real module so the read seam is exercised.
+        self.erpnext_read = self.load_module("erpnext_read")
         package = types.ModuleType("erpnext_ai_copilot")
         package.conversations = self.conversations
+        package.erpnext_read = self.erpnext_read
+        self.audit = self.load_module("audit")
+        self.audit.record_audit = mock.Mock(return_value={"name": "NMAU-1"})
         self.modules_patch = mock.patch.dict(
             sys.modules, {"frappe": self.frappe,
                           "erpnext_ai_copilot": package,
-                          "erpnext_ai_copilot.conversations": self.conversations})
+                          "erpnext_ai_copilot.conversations": self.conversations,
+                          "erpnext_ai_copilot.erpnext_read": self.erpnext_read,
+                          "frappe_app.erpnext_ai_copilot.audit": self.audit})
         self.modules_patch.start()
         self.addCleanup(self.modules_patch.stop)
         self.api = self.load_module("api")
@@ -555,6 +563,125 @@ class FrappeGatewayTest(unittest.TestCase):
         self.assertNotIn("nexmate_service_key", bundle)
         self.assertNotIn("X-NexMate-Key", bundle)
         self.assertNotIn(KEY, bundle)
+
+
+class AuthorizedReadSeamTest(FrappeGatewayTest):
+    """U5: the gateway is the ERPNext read enforcement point.
+
+    Inference may REQUEST a read; Frappe authorizes, executes, minimizes and
+    audits it, then returns only authorized context. Inference never authorizes
+    or executes, and the authorized context is never relayed to the browser.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._answer_body = dict(self.body)
+
+    def _script_legs(self, *bodies):
+        """Return `bodies` in order, one per upstream call."""
+        queue = list(bodies)
+
+        def _next(**kwargs):
+            body = queue.pop(0) if queue else self._answer_body
+            return iter([json.dumps(body).encode("utf-8")])
+
+        self.response.iter_content.side_effect = _next
+
+    def _read_then_answer(self, read_request):
+        # Leg 1 asks for a read; leg 2 answers using the authorized context.
+        self._script_legs({"read_request": read_request}, dict(self._answer_body))
+
+    def _read_forever(self, read_request):
+        # A peer that only ever asks for reads must not loop forever.
+        self._script_legs(*[{"read_request": read_request}] * 10)
+
+    def _valid_read_request(self):
+        return {"operation": "list", "doctype": "Customer",
+                "fields": ["name", "customer_name"], "limit": 20}
+
+    def test_7_1_inference_request_is_executed_by_frappe_under_session_user(self):
+        self._read_then_answer(self._valid_read_request())
+        with mock.patch.object(
+                self.erpnext_read, "attempt_read",
+                return_value={"doctype": "Customer", "operation": "list",
+                              "fields_returned": ["name", "customer_name"],
+                              "row_count": 1,
+                              "data": [{"name": "Test", "customer_name": "Test"}]},
+        ) as attempt:
+            out = self.api.ask("how many customers?")
+        attempt.assert_called_once()
+        # The authorized read is bound to the live session user, never a payload value.
+        self.assertEqual(self.erpnext_read.current_subject(), "synthetic-user")
+
+    def test_7_1_authorized_context_is_frappe_produced_and_bounded(self):
+        self._read_then_answer(self._valid_read_request())
+        with mock.patch.object(self.erpnext_read, "attempt_read",
+                               return_value={"doctype": "Customer", "operation": "list",
+                                             "fields_returned": ["name"],
+                                             "row_count": 0, "data": []}):
+            self.api.ask("how many customers?")
+        posted = self.client.post.call_args.kwargs["json"]
+        self.assertIn("authorized_context", posted)
+        ctx = posted["authorized_context"]
+        self.assertEqual(set(ctx), {"doctype", "operation", "fields_returned",
+                                    "row_count", "data"})
+        for forbidden in ("api_key", "api_secret", "user", "actor", "site", "credential"):
+            self.assertNotIn(forbidden, ctx)
+
+    def test_7_4_response_allowlist_unchanged_and_context_not_relayed(self):
+        self._read_then_answer(self._valid_read_request())
+        with mock.patch.object(self.erpnext_read, "attempt_read",
+                               return_value={"doctype": "Customer", "operation": "list",
+                                             "fields_returned": ["name"],
+                                             "row_count": 1,
+                                             "data": [{"name": "SECRET-CUSTOMER"}]}):
+            out = self.api.ask("how many customers?")
+        self.assertEqual(set(out), set(self.api.RESPONSE_FIELDS))
+        self.assertNotIn("authorized_context", out)
+        self.assertNotIn("SECRET-CUSTOMER", json.dumps(out))
+
+    def test_9_1_denial_collapsed_and_audited(self):
+        refusal = self.erpnext_read.NotFound("nope")
+        self._read_then_answer(self._valid_read_request())
+        with mock.patch.object(self.erpnext_read, "attempt_read", side_effect=refusal):
+            out = self.api.ask("how many customers?")
+        self.assertEqual(out["answer"], "Document not found or access denied.")
+        self.assertEqual(out["sources"], [])
+        self.assertEqual(out["confidence"], "low")
+
+    def test_6_4_audit_failure_denies_the_read(self):
+        self._read_then_answer(self._valid_read_request())
+        with mock.patch.object(self.erpnext_read, "attempt_read",
+                               side_effect=RuntimeError("audit store down")):
+            out = self.api.ask("how many customers?")
+        self.assertEqual(out["answer"], "Document not found or access denied.")
+        self.assertEqual(out["sources"], [])
+
+    def test_7_5_browser_cannot_supply_authorized_context_or_read(self):
+        for field in ("authorized_context", "read_request", "erpnext_read"):
+            with self.subTest(field=field):
+                self.frappe.form_dict = {"cmd": "erpnext_ai_copilot.api.ask",
+                                         "question": "hi", field: "x"}
+                with self.assertRaises(GatewayError):
+                    self.api.ask("hi")
+                self.assertEqual(self.client.post.call_count, 0)
+
+    def test_7_3_read_round_trip_is_bounded(self):
+        # A peer that only ever asks for reads must not loop forever.
+        self._read_forever(self._valid_read_request())
+        with mock.patch.object(self.erpnext_read, "attempt_read",
+                               return_value={"doctype": "Customer", "operation": "list",
+                                             "fields_returned": ["name"],
+                                             "row_count": 0, "data": []}):
+            with self.assertRaises(GatewayError):
+                self.api.ask("how many customers?")
+        self.assertLessEqual(self.client.post.call_count, self.api.MAX_READ_ROUNDS)
+
+    def test_10_14_user_read_path_reaches_no_legacy_endpoint(self):
+        src = open(self.api.__file__, encoding="utf-8").read()
+        for legacy in ("/tools/erpnext/document", "/tools/erpnext/list",
+                       "/tools/erpnext/schema", "tools.erpnext"):
+            self.assertNotIn(legacy, src, legacy)
 
 
 if __name__ == "__main__":

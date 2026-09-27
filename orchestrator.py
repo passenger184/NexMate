@@ -807,13 +807,104 @@ def _extract_erpnext_request(question: str) -> dict[str, Any]:
         messages, purpose="nlu", data_classes=("prompt",))))
 
 
+#: Mirrors of the Frappe-side read policy. The orchestrator may only *propose*
+#: a read inside these bounds; the Frappe adapter re-validates independently
+#: and is the actual enforcement point. Mirroring here keeps the proposal small
+#: and auditable rather than forwarding a model-authored projection verbatim.
+READ_FIELD_ALLOWLIST: dict[str, tuple[str, ...]] = {
+    "Customer": ("name", "customer_name", "customer_group", "territory", "customer_type", "disabled", "email_id", "mobile_no"),
+    "Supplier": ("name", "supplier_name", "supplier_group", "is_transporter", "disabled"),
+    "Item": ("name", "item_code", "item_name", "item_group", "stock_uom", "disabled", "is_stock_item"),
+    "Item Group": ("name", "item_group_name", "parent_item_group", "is_group", "lft", "rgt"),
+    "Company": ("name", "company_name", "abbr", "default_currency", "country"),
+    "Warehouse": ("name", "warehouse_name", "company", "is_group", "disabled"),
+    "Territory": ("name", "territory_name", "parent_territory", "is_group"),
+    "Customer Group": ("name", "customer_group_name", "parent_customer_group", "is_group"),
+    "Brand": ("name", "brand"),
+    "Sales Invoice": ("name", "customer", "posting_date", "grand_total", "status", "docstatus", "currency"),
+    "Sales Order": ("name", "customer", "transaction_date", "total", "status", "docstatus", "currency"),
+    "Sales Person": ("name", "sales_person_name", "is_group"),
+    "Lead": ("name", "lead_name", "status", "company"),
+    "Opportunity": ("name", "status", "party", "opportunity_amount", "currency"),
+    "Quotation": ("name", "customer", "status", "grand_total", "currency"),
+    "Delivery Note": ("name", "customer", "posting_date", "status", "docstatus"),
+    "Purchase Invoice": ("name", "supplier", "posting_date", "grand_total", "status", "docstatus", "currency"),
+    "Purchase Receipt": ("name", "supplier", "posting_date", "status", "docstatus"),
+    "Payment Entry": ("name", "payment_type", "party_type", "party", "paid_amount", "status"),
+    "Journal Entry": ("name", "voucher_type", "posting_date", "total_debit", "status", "docstatus"),
+    "GL Entry": ("name", "posting_date", "account", "debit", "credit", "party"),
+    "Mode of Payment": ("name", "mode_of_payment", "type"),
+    "Cost Center": ("name", "cost_center_name", "company", "is_group"),
+    "Project": ("name", "project_name", "status", "company", "expected_start_date"),
+    "Task": ("name", "subject", "status", "project", "exp_start_date"),
+    "Timesheet": ("name", "employee", "status", "total_hours"),
+    "Employee": ("name", "employee_name", "status", "company", "department"),
+}
+
+#: Fields a model may never propose, independent of doctype.
+READ_FILTER_DENYLIST = frozenset({"owner", "creation", "modified", "modified_by", "password", "api_key", "api_secret"})
+
+
+def _sanitize_requested_fields(request: dict[str, Any], op: str, doctype: str) -> list[str]:
+    """Constrain a model-proposed field projection to the policy allowlist.
+
+    Wildcards and unknown fields are dropped here; the Frappe adapter rejects
+    them outright. Never widens: a field outside the allowlist cannot be asked
+    for at all.
+    """
+    allowed = READ_FIELD_ALLOWLIST.get(doctype, ())
+    proposed = request.get("fields")
+    if not isinstance(proposed, list):
+        return ["name"]
+    kept = [f for f in proposed if isinstance(f, str) and f in allowed and f not in ("*",)]
+    if not kept:
+        return ["name"]
+    if op == "document":
+        return kept[:5]
+    return kept[:10]
+
+
+def _sanitize_requested_filters(request: dict[str, Any], doctype: str) -> dict[str, Any]:
+    """Constrain model-proposed filters to allowlisted fields and flat scalars."""
+    allowed = READ_FIELD_ALLOWLIST.get(doctype, ())
+    proposed = request.get("filters")
+    if not isinstance(proposed, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, value in proposed.items():
+        if not isinstance(key, str) or key in READ_FILTER_DENYLIST or key not in allowed:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            out[key] = value
+        elif isinstance(value, list) and len(value) <= 10:
+            if all(isinstance(v, (str, int, float, bool)) or v is None for v in value):
+                out[key] = value
+    return out
+
+
 def run_erpnext_branch(question: str,
-                       preextracted: dict[str, Any] | None = None
+                       preextracted: dict[str, Any] | None = None,
+                       authorized_context: dict[str, Any] | None = None,
                        ) -> dict[str, Any]:
+    """Answer a live-instance question from AUTHORIZED ERPNext context.
+
+    U5: this function no longer queries ERPNext for user business reads. It
+    either returns a read REQUEST for the Frappe control plane to authorize and
+    execute, or consumes the authorized, minimized context Frappe produced. It
+    never authorizes a read and holds no ERPNext credential for this purpose.
+
+    ``schema`` is deliberately outside the U5 business-read adapter (Decision
+    12) and remains a documented temporary consumer of the retained read
+    client, under the existing per-mode policy.
+    """
     request = preextracted or _extract_erpnext_request(question)
     op = request["op"]
     doctype = request["doctype"]
+
     if op == "schema":
+        # Temporary legacy consumer — see verification-notes.md. Removed from
+        # the user business-read path, but schema/metadata authorization is
+        # explicitly deferred by U5 and not yet redesigned.
         payload = erpnext.get_doctype_schema(doctype)["data"]
         summary = {
             "doctype": payload.get("doctype"),
@@ -826,18 +917,27 @@ def run_erpnext_branch(question: str,
                 for f in payload.get("fields", [])
             ],
         }
-    elif op == "document":
-        payload = erpnext.get_document(
-            doctype, request.get("name", ""))["data"]
-        summary = {"doctype": doctype, "document": payload}
+    elif authorized_context is not None:
+        # Frappe already authorized, minimized and audited this. Consume only.
+        summary = {
+            "doctype": authorized_context.get("doctype"),
+            "fields_returned": authorized_context.get("fields_returned"),
+            "row_count": authorized_context.get("row_count"),
+            "data": authorized_context.get("data"),
+        }
     else:
-        listed = erpnext.list_documents(
-            doctype,
-            filters=request.get("filters"),
-            fields=request.get("fields"),
-            limit=request.get("limit", config.ERPNEXT_DEFAULT_LIST_LIMIT),
-        )
-        summary = listed
+        # Ask the control plane. The request is untrusted and will be validated
+        # and authorized in-process by the Frappe adapter.
+        return {
+            "_read_request": {
+                "operation": "document" if op == "document" else "list",
+                "doctype": doctype,
+                "name": request.get("name") or None,
+                "fields": _sanitize_requested_fields(request, op, doctype),
+                "filters": _sanitize_requested_filters(request, doctype),
+                "limit": min(int(request.get("limit") or 20), 20),
+            }
+        }
 
     passages = json.dumps(summary, indent=2, default=str)
     messages = [
@@ -891,6 +991,7 @@ def handle_question(
     *,
     chat_only: bool = False,
     scope: dict[str, Any] | None = None,
+    authorized_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Route + execute + generate. Mirrors /ask's safety semantics.
 
@@ -911,7 +1012,8 @@ def handle_question(
     """
     tag: dict[str, Any] = {}
     out = _handle_question_inner(question, conversation_id, history, mode, tag, chat_only,
-                                 scope=scope)
+                                 scope=scope,
+                                 authorized_context=authorized_context)
     out = dict(out)
     out.setdefault("nlu_kind", tag.get("nlu_kind"))
     out.setdefault("nlu_confidence", tag.get("nlu_confidence"))
@@ -928,6 +1030,7 @@ def _handle_question_inner(
     tag: dict[str, Any],
     chat_only: bool = False,
     scope: dict[str, Any] | None = None,
+    authorized_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Body of handle_question; records its NLU verdict into tag.
 
@@ -1103,7 +1206,8 @@ def _handle_question_inner(
                 }
             else:
                 out = run_erpnext_branch(
-                    question, preextracted=request)
+                    question, preextracted=request,
+                    authorized_context=authorized_context)
         except (erpnext.ErpnextUnavailable, erpnext.ErpnextApiError,
                 ValueError, json.JSONDecodeError) as exc:
             out = {
@@ -1111,6 +1215,15 @@ def _handle_question_inner(
                 "sources": [], "confidence": "low",
                 "fallback": "lookup-failure",
             }
+        # U5: a read REQUEST is not an answer. Return the marker so the Frappe
+        # control plane can authorize and execute the read; no generation runs
+        # on this leg and no ERPNext credential is used.
+        if "_read_request" in out:
+            out.pop("route", None)
+            out.pop("route_how", None)
+            out["route"] = route
+            out["route_how"] = f"{how}+read-requested"
+            return out
         out.update({"route": route, "route_how": how})
         return out
 

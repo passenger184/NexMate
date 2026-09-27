@@ -101,6 +101,27 @@ this once":
   sharing, ACL representation and site-to-repository binding remain open.
   Site isolation does not approve shared multi-workspace routing.
 
+## Delivered boundary: Frappe-authorized ERPNext business reads (2026-09-27)
+
+Authenticated user ERPNext business-data reads (`document`, `list`) are
+authorized inside the Frappe request process against `frappe.session.user`
+using native permission-aware ORM. The adapter exposes no identity parameter,
+rejects a request that carries one, uses only permission-aware APIs, applies
+field-level read permissions before serialization, returns only an explicit
+field projection, emits exactly one metadata-only `erpnext_read` audit event
+per read, and **denies the read if the audit write fails**. Not-found and
+permission-denied produce one caller-indistinguishable outcome. Inference may
+request a read but cannot authorize or execute one.
+
+**This is evidence-bounded, not a certification.** It was implemented and
+offline-verified only; the live two-user authorization matrix is outstanding.
+It does not cover DocType schema/metadata reads (still on the retained legacy
+client), knowledge-corpus retrieval ACL, multi-site routing (U1), or the write
+path, and it does not reduce inference-side ERPNext risk to zero because the
+shared credential is retained for the version lookup and legacy writes. Mode is
+not ERPNext authorization. Nothing here grants production-write approval or
+cloud consent.
+
 ## Local-default data and all-call egress policy
 
 Company documents, source code, configuration, resolved issues and live ERP

@@ -1,8 +1,54 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-26 — documentation reconciliation of post-M7 project state completed under the documentation-only OpenSpec change `reconcile-post-m7-project-state`. M7 **CLOSED** with final decisions: release NOT READY, production writes DENIED/PENDING (none authorized), cloud consent NO GRANT. No active implementation milestone and no M8. `ARCHITECTURE.md` reconciled forward to delivered M2–M6 plus the two post-M7 routing changes.
+**Last updated:** 2026-09-27 — U5 `frappe-native-authorized-erpnext-reads` implemented and offline-verified (457 Python tests OK / 1 skipped, Node harness passing). ERPNext business-record reads are now authorized in the Frappe request process against `frappe.session.user`. Live two-user authorization evidence and the audit DocType migration are approval-gated and NOT yet performed. M7 remains closed and authoritative; no M8.
+**Prior:** 2026-09-26 — documentation reconciliation of post-M7 project state completed under the documentation-only OpenSpec change `reconcile-post-m7-project-state`. M7 **CLOSED** with final decisions: release NOT READY, production writes DENIED/PENDING (none authorized), cloud consent NO GRANT. No active implementation milestone and no M8. `ARCHITECTURE.md` reconciled forward to delivered M2–M6 plus the two post-M7 routing changes.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; M2–M7 closed; no new phase or production-readiness acceptance.
 **Current task:** None active. Work since M7 has been evidence and documentation stabilization only. Further implementation work needs a separately approved OpenSpec change.
+
+## 2026-09-27 U5 frappe-native-authorized-erpnext-reads — implementation and offline evidence
+
+OpenSpec change `frappe-native-authorized-erpnext-reads`. The authenticated
+Frappe request process is now the authorization enforcement point for ERPNext
+business-data reads (`document`, `list`).
+
+- New `frappe_app/erpnext_ai_copilot/erpnext_read.py`: sole subject
+  `frappe.session.user`; no `user`/`actor`/`username`/`site`/`mode` parameter;
+  strict operation/doctype/name/field/filter/limit validation (no wildcard, no
+  nested filter objects, no unsafe field refs, adapter list bound 20 vs the
+  contract's 100); permission-aware ORM only; field-level read permissions
+  applied before serialization with explicit projection and null-pruning;
+  minimized result; one metadata-only `erpnext_read` audit event per read;
+  fail-closed audit; not-found/permission-denied collapsed to one
+  caller-indistinguishable outcome.
+- Read seam: inference emits an untrusted read REQUEST; the gateway performs
+  the authorized read in-process and returns a bounded Frappe-produced
+  `authorized_context`. Bounded round trips, inbound-only, never relayed to the
+  browser (response allowlist unchanged). Browser-supplied
+  `authorized_context`/`read_request` refused.
+- Orchestrator cutover: the user business-read path no longer calls
+  `tools/erpnext.py`. Model-proposed `fields`/`filters` are constrained to a
+  mirrored allowlist before the request leaves inference.
+- Audit DocType gained `erpnext_read` plus `not_found`/`permission_denied`/
+  `invalid_request` outcomes; `retrieval` and the existing outcomes preserved.
+  This is a DocType option change requiring a migration — **not yet run**
+  (approval-gated).
+- Legacy `/tools/erpnext/{schema,document,list}` retained and marked deprecated
+  with an explicit non-authorizing access policy; not removed.
+- Mode is orthogonal: the same user gets the same authorized result in either
+  mode (tested).
+
+**Offline evidence:** 457 Python tests OK (1 skipped), Node harness passing,
+`node --check` clean. Two test suites added: `tests/test_erpnext_read_adapter.py`
+(40) and `tests/test_u5_read_boundary.py` (25), plus a gateway read-seam class.
+
+**Limits / not yet obtained.** Live two-user allowed/denied authorization
+matrix (needs an approval-gated restricted user), User Permission / owner /
+sharing cases, the audit DocType migration, and an inference run with the
+ERPNEXT credential absent. `schema` reads remain on the retained legacy client
+per Decision 12. The shared credential is retained for the version lookup and
+legacy writes, so inference-side ERPNext risk is reduced, not eliminated. U1,
+knowledge-corpus retrieval ACL parity, and the M7 production-readiness decision
+are unchanged.
 
 ## 2026-09-26 Post-M7 routing stabilization — DEMONSTRATED (28/29 live)
 

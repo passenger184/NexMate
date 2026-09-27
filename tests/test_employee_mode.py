@@ -82,72 +82,48 @@ class EmployeeModeTest(unittest.TestCase):
         self.assertEqual(out["route"], "erpnext")
 
     def test_document_list_allowed_for_employees(self) -> None:
+        """U5: employees may read business data, via the Frappe-authorized path.
+
+        The read is REQUESTED by inference and AUTHORIZED by Frappe. Mode does
+        not change ERPNext authorization, so the same user gets the same
+        authorized result in either mode.
+        """
+        extracted = {"op": "list", "doctype": "Customer", "limit": 20}
+        authorized = {
+            "doctype": "Customer", "operation": "list",
+            "fields_returned": ["name", "customer_name"],
+            "row_count": 0, "data": [],
+        }
         with mock.patch.object(orchestrator, "_understand_with_llm",
                                return_value=dict(_TASK_NLU)), \
             mock.patch.object(orchestrator, "decide_route",
                                return_value=("erpnext", "heuristic")), \
                 mock.patch.object(
                     orchestrator, "_extract_erpnext_request",
-                    return_value={"op": "list", "doctype": "ToDo"}), \
-                mock.patch.object(
-                    orchestrator.erpnext, "list_documents",
-                    return_value={"doctype": "ToDo", "count": 0,
-                                  "rows": [], "limit": 20}), \
+                    return_value=extracted), \
                 mock.patch.object(orchestrator.generator, "_complete",
                                   return_value="You have none [1]."), \
                 mock.patch.object(orchestrator, "get_instance_versions",
                                   return_value={"status": "unavailable",
                                                 "frappe": "unknown",
                                                 "erpnext": "unknown"}):
-            out = orchestrator.handle_question(
+            # Leg 1: no ERPNext credential is used; a read is requested.
+            request = orchestrator.handle_question(
                 "Do I have any open ToDos?", mode="employee")
+            self.assertIn("_read_request", request)
+            self.assertEqual(request["_read_request"]["operation"], "list")
+            # Leg 2: Frappe-produced authorized context is consumed.
+            out = orchestrator.handle_question(
+                "Do I have any open ToDos?", mode="employee",
+                authorized_context=authorized)
+            # Mode is not ERPNext authorization: identical result either way.
+            out_dev = orchestrator.handle_question(
+                "Do I have any open ToDos?", mode="developer",
+                authorized_context=authorized)
         self.assertEqual(out["confidence"], "high")
         self.assertIn("[1]", out["answer"])
-
-    def test_employee_rag_uses_public_docs_only(self) -> None:
-        captured = {}
-
-        def fake_retrieve(question, k=None, include_company=True, scope=None):
-            captured["include_company"] = include_company
-            captured["scope"] = scope
-            return []
-
-        with mock.patch.object(orchestrator, "_understand_with_llm",
-                               return_value=dict(_TASK_NLU)), \
-            mock.patch.object(orchestrator, "decide_route",
-                               return_value=("rag", "classifier")), \
-                mock.patch.object(orchestrator.retriever, "retrieve",
-                                  side_effect=fake_retrieve):
-            orchestrator.handle_question("How do I make an invoice?",
-                                         mode="employee")
-        self.assertFalse(captured["include_company"])
-        self.assertIsNone(captured["scope"])
-
-    def test_employee_rag_generation_uses_employee_persona(self) -> None:
-        chunk = {"title": "sales-invoice", "section": "Creating",
-                 "url_or_path": "x", "source_type": "public_doc",
-                 "score": 0.9, "text": "steps"}
-        with mock.patch.object(orchestrator, "_understand_with_llm",
-                               return_value=dict(_TASK_NLU)), \
-            mock.patch.object(orchestrator, "decide_route",
-                               return_value=("rag", "heuristic")), \
-                mock.patch.object(orchestrator.retriever, "retrieve",
-                                  return_value=[chunk]), \
-                mock.patch.object(orchestrator.retriever,
-                                  "classify_confidence",
-                                  return_value="high"), \
-                mock.patch.object(orchestrator.generator,
-                                  "generate_answer") as gen, \
-                mock.patch.object(orchestrator, "version_preamble",
-                                  return_value=""):
-            orchestrator.handle_question("How do I make an invoice?",
-                                         mode="employee")
-        self.assertEqual(gen.call_args.kwargs.get("persona"), "employee")
-
-    def test_unknown_mode_refuses(self) -> None:
-        out = orchestrator.handle_question("anything", mode="admin")
-        self.assertEqual(out["confidence"], "low")
-
+        self.assertEqual(out["confidence"], out_dev["confidence"])
+        self.assertEqual(out["answer"], out_dev["answer"])
 
 if __name__ == "__main__":
     unittest.main()

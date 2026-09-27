@@ -335,7 +335,8 @@ class ChatBoundaryTest(unittest.TestCase):
             response = self.post(dict(ENVELOPE, scope=scope))
             self.assertEqual(response.status_code, 200, response.text)
             handle.assert_called_once_with(
-                "help", None, [], mode="employee", chat_only=True, scope=scope)
+                "help", None, [], mode="employee", chat_only=True, scope=scope,
+                authorized_context=None)
             self.assertEqual(response.json()["route"], "capability")
 
     def test_authz_scope_none_is_stateless(self) -> None:
@@ -381,7 +382,7 @@ class ChatBoundaryTest(unittest.TestCase):
             response = self.post({"question": "help", "mode": "developer"})
             self.assertEqual(response.status_code, 200)
             handle.assert_called_once_with("help", None, [], mode="developer", chat_only=False,
-                                               scope=None)
+                                               scope=None, authorized_context=None)
             versions.assert_called_once_with()
         self.assertIn("Live ERPNext data lookups", response.json()["answer"])
 

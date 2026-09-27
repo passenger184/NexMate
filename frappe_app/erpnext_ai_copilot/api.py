@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 import frappe
 import requests
 
-from erpnext_ai_copilot import conversations
+from erpnext_ai_copilot import conversations, erpnext_read
 
 
 logger = logging.getLogger("nexmate.gateway")
@@ -22,6 +22,17 @@ CONVERSATION_FORM_FIELDS = frozenset({"cmd", "conversation_id"})
 RESPONSE_FIELDS = (
     "answer", "sources", "confidence", "route", "mode", "conversation_id", "version_info",
 )
+
+# --- U5 authorized ERPNext read seam -------------------------------------
+# Inference may REQUEST a read. It may never authorize or execute one. Frappe
+# performs the read under the live session user and returns only the authorized,
+# minimized result. These names are protocol constants, not caller input.
+READ_REQUEST_FIELD = "read_request"
+AUTHORIZED_CONTEXT_FIELD = "authorized_context"
+#: Bounded round trips so a misbehaving peer cannot loop the request.
+MAX_READ_ROUNDS = 3
+#: Hard ceiling on the authorized payload that may cross toward inference.
+MAX_AUTHORIZED_CONTEXT_BYTES = 64 * 1024
 
 
 def _valid_identity(value: object) -> bool:
@@ -114,7 +125,18 @@ def _forward(url: str, key: str, envelope: dict, read_timeout: float) -> dict | 
                     if len(raw) > MAX_RESPONSE_BYTES:
                         return "gateway_upstream_response_too_large"
                 data = json.loads(raw)
-        if not isinstance(data, dict) or not set(RESPONSE_FIELDS) <= data.keys():
+        if not isinstance(data, dict):
+            return "gateway_upstream_protocol_error"
+        # A peer may answer a turn with a read REQUEST instead of a final
+        # answer. That is a protocol branch, not a response: it is recognised
+        # here and handed back for Frappe-side execution. The requested read is
+        # untrusted input and is validated by the adapter, not here.
+        if READ_REQUEST_FIELD in data and not set(RESPONSE_FIELDS) <= data.keys():
+            requested = data[READ_REQUEST_FIELD]
+            if not isinstance(requested, dict):
+                return "gateway_upstream_protocol_error"
+            return {"_read_request": requested}
+        if not set(RESPONSE_FIELDS) <= data.keys():
             return "gateway_upstream_protocol_error"
         result = {field: data[field] for field in RESPONSE_FIELDS}
         expected_id = (envelope.get("conversation") or {}).get("id")
@@ -146,6 +168,37 @@ def _authenticated_user() -> str:
     if not user or user == "Guest":
         frappe.throw("Authentication required.", frappe.PermissionError)
     return user
+
+
+def _authorized_read(requested: dict, correlation: str, request_id: str) -> dict:
+    """Execute one Frappe-native authorized ERPNext read for the session user.
+
+    The request originated in inference and is therefore untrusted. It is
+    validated and authorized entirely in-process by the adapter; this function
+    only hands it over and bounds what comes back.
+
+    On any refusal the anti-oracle collapse is applied so the caller cannot
+    distinguish not-found from permission-denied. The internal distinction is
+    preserved in the audit event only.
+    """
+    payload = dict(requested)
+    payload.setdefault("correlation", correlation)
+    payload.setdefault("request_id", request_id)
+    try:
+        context = erpnext_read.attempt_read(payload)
+    except erpnext_read.ReadRefusal as refusal:
+        return {"_denied": erpnext_read.collapse_for_caller(refusal)}
+    except Exception:
+        # Includes audit-write failure: fail closed, no data returned.
+        logger.warning("authorized_read_failed")
+        return {"_denied": erpnext_read.collapse_for_caller(
+            erpnext_read.AuditUnavailable("read unavailable"))}
+    serialized = json.dumps(context, default=str)
+    if len(serialized) > MAX_AUTHORIZED_CONTEXT_BYTES:
+        logger.warning("authorized_context_too_large")
+        return {"_denied": erpnext_read.collapse_for_caller(
+            erpnext_read.InvalidRequest("result exceeds the authorized payload bound"))}
+    return {"_context": context}
 
 
 def _refuse_extra_fields(allowed: frozenset) -> None:
@@ -251,10 +304,32 @@ def ask(question: str, conversation_id: str | None = None) -> dict:
         envelope["conversation"] = {
             "id": name, "owner": user, "site": site, "turns": forward,
         }
-    result = _forward(url, key, envelope, read_timeout)
-    if isinstance(result, str):
-        logger.warning(result)
-        frappe.throw(result)
+    result = None
+    for _round in range(MAX_READ_ROUNDS):
+        result = _forward(url, key, envelope, read_timeout)
+        if isinstance(result, str):
+            logger.warning(result)
+            frappe.throw(result)
+        if "_read_request" in result:
+            # Inference asked for ERPNext business data. Frappe authorizes and
+            # performs the read itself under the session user, then returns
+            # only the authorized, minimized context.
+            outcome = _authorized_read(
+                result["_read_request"],
+                correlation=(envelope.get("conversation") or {}).get("id") or "nexmate-read",
+                request_id=f"{_round}",
+            )
+            if "_denied" in outcome:
+                result = outcome["_denied"]
+                break
+            envelope = dict(envelope)
+            envelope[AUTHORIZED_CONTEXT_FIELD] = outcome["_context"]
+            continue
+        break
+    else:
+        # Exhausted the bounded round trips without a final answer.
+        logger.warning("gateway_read_round_limit")
+        frappe.throw("gateway_upstream_protocol_error")
     if conversation_id is not None:
         _owned(conversations.append_turn, name, "assistant", result["answer"])
     return result

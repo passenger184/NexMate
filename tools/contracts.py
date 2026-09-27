@@ -167,20 +167,26 @@ CONTRACTS: dict[str, dict[str, Any]] = {
     "erpnext_read": {
         "operation": "erpnext_read",
         "side_effect": "read",
+        # A read is not approval-gated: it creates no durable proposal and runs
+        # no approval/execution lifecycle. Authorization is enforced in-process
+        # against the live Frappe session user by the Frappe-native adapter.
         "approval_required": False,
-        "permission": None,
+        "permission": "frappe-session-user-read",
         "context": ("actor", "site", "scope"),
         "bounded_inputs": {
-            "doctype": {"type": "string"},
+            "operation": {"type": "string", "required": True},
+            "doctype": {"type": "string", "required": True},
             "name": {"type": "string"},
+            "fields": {"type": "array", "required": True},
             "filters": {"type": "object"},
             "limit": {"type": "integer", "maximum": 100},
         },
         "bounded_outputs": {"data": {"type": "object"}},
-        "typed_errors": ("not_found", "permission_denied"),
+        "typed_errors": ("not_found", "permission_denied", "invalid_request",
+                         "unsupported_operation", "audit_unavailable"),
         "timeout_seconds": 15,
-        "provenance": ("doctype", "filters"),
-        "audit_event": "retrieval",
+        "provenance": ("doctype", "operation", "fields_returned", "actor", "site"),
+        "audit_event": "erpnext_read",
     },
 }
 

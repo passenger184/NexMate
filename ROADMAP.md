@@ -86,6 +86,31 @@ hard-codes `"execution_scope": "chat-only"`. Desk-facing Developer Mode,
 permission parity with the incoming Desk identity (**U5**) and the normal
 integration user's `Customer` schema access (403) all remain unproven.
 
+## U5 frappe-native-authorized-erpnext-reads — CLOSED (2026-09-27), independent of M7
+
+Authenticated user ERPNext business-data reads (`document`, `list`) are now
+authorized inside the Frappe request process against `frappe.session.user`,
+with strict request validation, field-level enforcement before serialization,
+minimized results, one metadata-only audit event per read, fail-closed audit,
+and externally indistinguishable not-found/permission-denied. Inference no
+longer queries ERPNext for those reads and no longer needs the shared
+credential for them.
+
+**Scope honesty.** This resolves U5 for **ERPNext business-record reads only**.
+Knowledge-corpus retrieval ACL coarse tiers, multi-site tenancy (U1), DocType
+schema/metadata authorization, and the shared credential retained for the
+version lookup and legacy writes all remain open. `schema` reads stay on the
+retained legacy client under the existing per-mode policy.
+
+**Evidence.** Implemented and offline-verified: 457 Python tests OK (1 skipped)
+and the Node harness passing, including a dedicated adapter suite and a
+boundary suite. **Not** yet obtained: the live two-user authorization matrix
+and the audit DocType migration, both approval-gated.
+
+**This change does not reopen M7.** Release **NOT READY**, production writes
+**DENIED/PENDING** and private-data cloud/provider consent **NO GRANT** remain
+the authoritative M7 decisions, unchanged. No M8 was created.
+
 ## Current position — 2026-09-26
 
 - **M2, M3, M4, M5, M6 and M7 are all CLOSED.** No milestone is active.

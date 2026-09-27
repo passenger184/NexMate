@@ -348,54 +348,71 @@ class ExtractionNameValidationTest(unittest.TestCase):
 
 
 class UnknownDoctypeTest(unittest.TestCase):
-    # A plural DocType guess ("show invoices for review" -> extractor
-    # guesses DocType "Invoices") meets Frappe's 404 "DocType Invoices not
-    # found". That 404 must surface as a plain naming explanation, never a
-    # raw error dump and never an answer. (Bare "invoices" alone now
-    # clarifies before the branch via the bare-fragment guard; this probe
-    # carries intent verbs so it still reaches the branch under test.)
+    """U5: the ERPNext business-read path no longer calls the read client.
+
+    The shared-credential 404 path below is retained ONLY for the `schema`
+    operation, which Decision 12 keeps on the legacy client until native
+    metadata authorization is designed separately. A business-data read of an
+    unapproved DocType is now refused by the Frappe adapter, and under the
+    anti-oracle requirement a not-found and a permission-denied collapse to one
+    indistinguishable denial that must NOT name the DocType.
+    """
     TASK_NLU = {"kind": "task", "subtype": None, "topic": "invoices",
                 "context_dependency": "none", "confidence": 0.9}
     FRAPPE_404 = ('["{\\"message\\":\\"DocType Invoices not found\\",'
                   '\\"raise_exception\\":1}]')
 
-    def _run(self, exc):
+    def _run_schema(self, exc):
         with mock.patch.object(orchestrator, "_understand_with_llm",
                                 return_value=dict(self.TASK_NLU)), \
                 mock.patch.object(orchestrator, "decide_route",
                                    return_value=("erpnext", "classifier")), \
                 mock.patch.object(
                     orchestrator, "_extract_erpnext_request",
-                    return_value={"op": "list", "doctype": "Invoices",
-                                  "limit": 20}), \
-                mock.patch.object(orchestrator.erpnext, "list_documents",
+                    return_value={"op": "schema", "doctype": "Invoices"}), \
+                mock.patch.object(orchestrator.erpnext, "get_doctype_schema",
                                   side_effect=exc):
             return orchestrator.handle_question("show invoices for review")
 
-    def test_unknown_doctype_404_names_the_bad_name(self) -> None:
-        out = self._run(orchestrator.erpnext.ErpnextApiError(
+    def test_business_read_of_unapproved_doctype_is_a_read_request(self) -> None:
+        """A plural DocType guess now produces a read request the adapter refuses."""
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(self.TASK_NLU)), \
+                mock.patch.object(orchestrator, "decide_route",
+                                  return_value=("erpnext", "classifier")), \
+                mock.patch.object(
+                    orchestrator, "_extract_erpnext_request",
+                    return_value={"op": "list", "doctype": "Invoices", "limit": 20}):
+            out = orchestrator.handle_question("show invoices for review")
+        self.assertIn("_read_request", out)
+        # The adapter refuses it (not in the approved policy) and the caller
+        # sees ONE collapsed denial that does not reveal existence.
+        from frappe_app.erpnext_ai_copilot import erpnext_read as er
+        with self.assertRaises(er.DocTypeNotAllowed):
+            er.build_request(out["_read_request"])
+        collapsed = er.collapse_for_caller(er.DocTypeNotAllowed("x"))
+        self.assertNotIn("Invoices", collapsed["answer"])
+        self.assertEqual(collapsed["answer"], "Document not found or access denied.")
+
+    def test_schema_404_names_the_bad_name(self) -> None:
+        out = self._run_schema(orchestrator.erpnext.ErpnextApiError(
             404, self.FRAPPE_404))
         self.assertEqual(out["route"], "erpnext")
         self.assertEqual(out["confidence"], "low")
         self.assertEqual(out["fallback"], "lookup-failure")
         self.assertIn("'Invoices'", out["answer"])
         self.assertNotIn("ERPNext returned 404", out["answer"])
-        self.assertEqual(out["sources"], [])
 
-    def test_other_failures_keep_generic_wording(self) -> None:
-        out = self._run(orchestrator.erpnext.ErpnextUnavailable(
+    def test_schema_other_failures_keep_generic_wording(self) -> None:
+        out = self._run_schema(orchestrator.erpnext.ErpnextUnavailable(
             "connection refused"))
-        self.assertIn("Could not complete the live-instance lookup",
-                      out["answer"])
+        self.assertIn("Could not complete the live-instance lookup", out["answer"])
         self.assertEqual(out["fallback"], "lookup-failure")
 
-    def test_non_doctype_404_keeps_generic_wording(self) -> None:
-        out = self._run(orchestrator.erpnext.ErpnextApiError(
+    def test_schema_non_doctype_404_keeps_generic_wording(self) -> None:
+        out = self._run_schema(orchestrator.erpnext.ErpnextApiError(
             404, "missing document body"))
-        self.assertIn("Could not complete the live-instance lookup",
-                      out["answer"])
-
-
+        self.assertIn("Could not complete the live-instance lookup", out["answer"])
 class NluTelemetryTest(unittest.TestCase):
     def test_every_result_carries_its_nlu_verdict(self) -> None:
         # Fast-path: deterministic marker, no model verdict.

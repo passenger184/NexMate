@@ -1,9 +1,4 @@
-# audit-ledger Specification
-
-## Purpose
-A correlated, durable audit ledger linking every AI request, tool decision, proposal, approval, execution, and failure by actor, site, and correlation identifier, with redaction, access control, and recovery guarantees.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Correlated lifecycle audit
 The system SHALL record a durable audit trail covering AI requests, permitted retrieval provenance, ERPNext business-data reads, tool calls, proposal creation, approvals/rejections/expiry, executions, successes, denials, failures, and security events. Each record SHALL be linked by authenticated actor, site, and correlation/request/action identifiers. The trail SHALL account for failed and denied actions as well as successes, and for audit-persistence failures themselves. Audit records SHALL include the exact immutable proposal target/payload or diff reference, the approver, the permission recheck result, and the execution outcome.
@@ -41,18 +36,3 @@ Every ERPNext business-data read SHALL produce exactly one dedicated ERPNext rea
 #### Scenario: Read denied when audit cannot be written
 - **WHEN** the audit write accompanying a business read fails
 - **THEN** no authorized ERPNext data is returned and the audit-persistence failure is surfaced
-
-### Requirement: Redaction, access, retention, and tamper resistance
-Audit storage SHALL enforce redaction of sensitive fields, role/policy-based access control, tamper-resistance, retention and deletion policy, and restore objectives. Complete lifecycle audit SHALL NOT mean retention of every raw prompt or raw result; content SHALL be minimized and redacted per policy. Secrets and credentials SHALL be excluded from audit records regardless of ordinary content approval.
-
-#### Scenario: Redacted content
-- **WHEN** an audit record containing a prompt with a contained secret is inspected
-- **THEN** the secret field is redacted while actor/site/action/outcome metadata remains queryable
-
-#### Scenario: Access restricted
-- **WHEN** a user without audit-read permission queries the ledger
-- **THEN** the request is refused without leaking audit content
-
-#### Scenario: Retention and deletion honored
-- **WHEN** retention/deletion policy requires expiry of an audit slice
-- **THEN** the slice is deleted or archived per policy and remains inaccessible through the API after deletion

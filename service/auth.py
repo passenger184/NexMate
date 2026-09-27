@@ -1,4 +1,5 @@
 import hmac
+import json
 import logging
 import re
 import unicodedata
@@ -85,6 +86,56 @@ def validate_conversation_block(conv: object, user: str) -> list[dict[str, str]]
 SCOPE_KEYS = frozenset({"site", "tiers", "roles", "derived_by"})
 SCOPE_TIERS = ("public", "site", "restricted")
 SCOPE_DERIVED_BY_MARKER = "frappe-gateway"
+
+# --- U5 authorized ERPNext context ----------------------------------------
+# Inference CONSUMES this Frappe-produced, already-authorized data. It is
+# structure-checked here so a malformed or oversized payload cannot be used.
+# This check NEVER grants authorization; Frappe already performed it.
+AUTHORIZED_CONTEXT_KEYS = frozenset({"doctype", "operation", "fields_returned", "row_count", "data"})
+AUTHORIZED_CONTEXT_OPERATIONS = ("document", "list")
+MAX_AUTHORIZED_CONTEXT_BYTES = 64 * 1024
+MAX_AUTHORIZED_CONTEXT_ROWS = 20
+
+
+def validate_authorized_context(context: object) -> dict:
+    """Structure and bound validation for Frappe-produced authorized data.
+
+    Frappe is authoritative for the authorization decision; this check never
+    grants it. It confirms the frozen shape, a supported operation, bounded
+    field/row counts and a bounded serialized size, and rejects anything that
+    looks like a credential or an authorization-subject override.
+    """
+    if not isinstance(context, dict) or set(context) != AUTHORIZED_CONTEXT_KEYS:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    if context.get("operation") not in AUTHORIZED_CONTEXT_OPERATIONS:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    doctype = context.get("doctype")
+    if not isinstance(doctype, str) or not doctype or len(doctype) > 140:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    fields_returned = context.get("fields_returned")
+    if (not isinstance(fields_returned, list)
+            or len(fields_returned) > 20
+            or not all(isinstance(f, str) and 0 < len(f) <= 140 for f in fields_returned)):
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    row_count = context.get("row_count")
+    if row_count is not None and (not isinstance(row_count, int) or row_count < 0
+                                  or row_count > MAX_AUTHORIZED_CONTEXT_ROWS):
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    data = context.get("data")
+    if context["operation"] == "document":
+        if not isinstance(data, dict) or not data:
+            raise HTTPException(status_code=422, detail="invalid_authorized_context")
+        if not set(data) <= set(fields_returned):
+            raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    else:
+        if not isinstance(data, list) or len(data) > MAX_AUTHORIZED_CONTEXT_ROWS:
+            raise HTTPException(status_code=422, detail="invalid_authorized_context")
+        for row in data:
+            if not isinstance(row, dict) or not set(row) <= set(fields_returned):
+                raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    if len(json.dumps(context, default=str)) > MAX_AUTHORIZED_CONTEXT_BYTES:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    return context
 
 
 def validate_authz_scope(scope: object, user: str, site: str) -> dict:
@@ -183,4 +234,6 @@ def validate_gateway_envelope(payload: dict, supplied: set[str],
         validate_conversation_block(payload["conversation"], payload["user"])
     if "scope" in supplied and payload.get("scope") is not None:
         validate_authz_scope(payload["scope"], payload["user"], payload["site"])
+    if "authorized_context" in supplied and payload.get("authorized_context") is not None:
+        validate_authorized_context(payload["authorized_context"])
     return True

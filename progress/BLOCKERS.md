@@ -173,8 +173,17 @@ needs its own separately approved OpenSpec change and a controlled environment.
   MISSING.** Dynamic `0.1.0` and the Frappe `>=15` declaration remain
   unvalidated against a v16 product scope (U8).
 - **CI tests/lint — NOT CONFIGURED.** Recorded as not-configured, not as passed.
-- **Full intra-site ACL parity — DEFERRED BY DESIGN (U5).** M4 shipped coarse
-  retrieval tiers, so ERPNext permission parity is not delivered.
+- **Full intra-site ACL parity — PARTIALLY RESOLVED (U5).** ERPNext
+  business-record reads (`document`, `list`) are now authorized in the Frappe
+  request process against the authenticated user (U5 change, 2026-09-27).
+  **Still open:** knowledge-corpus retrieval ACL remains coarse tiers by
+  design, so retrieval ACL parity is not delivered; multi-site tenancy (U1),
+  DocType schema/metadata authorization, and the shared credential retained for
+  the version lookup and legacy writes also remain open.
+- **U5 live two-user authorization evidence — NOT OBTAINED (approval-gated).**
+  The implementation is offline-verified only. The allowed/denied x user x
+  DocType x document matrix, and the audit DocType option migration, both
+  require explicit approval before test data is created or a migration is run.
 - **Normal integration-user `Customer` schema access — NOT DEMONSTRATED.** The
   `GET /api/resource/DocType/Customer` 403 is an upstream Frappe permission
   outcome for that test user, recorded as still-not-demonstrated. No permission
