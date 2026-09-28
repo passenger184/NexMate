@@ -21,7 +21,7 @@ knowledge is an approved target, not a selected shared-tenancy mechanism.
 > This section records the M5 → M6 decision as it was made. It is **history,
 > not an active pointer**: M6, M7 and the post-M7 work below have all since
 > closed. It is retained verbatim for provenance. The current position is the
-> "Current position" section above.
+> "Current position" section below.
 
 M5 `durable-tool-execution-audit` is complete: implemented (20/20 tasks), hardened (fail-closed, owner-only, hash pre/site, Frappe ORM business-write, app-local code root), offline-verified (`330` Python tests `OK (1 skipped)`, `67` Node PASS, `7` specs + `1` change `strict PASS`), live-verified (Frappe M5 tables created via `bench --site frontend migrate` exit `0`, `tabNexMate Tool Proposal`/`Audit Entry` `0` rows, DocType authority with naive UTC, mock execution `succeeded` + `audit_pending`/`read-back`), archived, and committed as `ba220a8` (M5 offline) plus hardening (this commit) on `origin/main`. Per user direction the active pointer advanced to **M6 — Release and deployment parity** (packaging/installation direction: R04–R07, R10). That pointer authorized no implementation: M6 needed a separately approved OpenSpec change with its own requirements, design, and acceptance evidence. M4 delivered ACL/generations/egress; M5 delivered durable proposals, audit ledger, and filtered Debug. Remaining limitations: live cross-worker concurrency, live second-actor, live business-write, live uncertain/reconcile, and `frappe_app/` subdirectory packaging are documented as future verification/packaging work.
 
@@ -102,28 +102,49 @@ schema/metadata authorization, and the shared credential retained for the
 version lookup and legacy writes all remain open. `schema` reads stay on the
 retained legacy client under the existing per-mode policy.
 
-**Evidence.** Implemented and offline-verified: 457 Python tests OK (1 skipped)
+**Evidence.** Implemented and verified: 457 Python tests OK (1 skipped)
 and the Node harness passing, including a dedicated adapter suite and a
-boundary suite. **Not** yet obtained: the live two-user authorization matrix
-and the audit DocType migration, both approval-gated.
+boundary suite. Live verification was subsequently performed on 2026-09-27
+on test Bench site `frontend` (Frappe 16.31.0 / ERPNext 16.33.0) with explicit
+project-owner approval for the migration, the fixtures and the live runs:
+`bench --site frontend migrate` exited 0 with all four NexMate DocTypes
+persisting and no orphan deletion; role authorization, User Permission,
+`if_owner` and DocShare were proven with differing row sets per user; field
+minimization returned only the requested fields; exactly three metadata-only
+`erpnext_read` audit events were written for three reads (`success`,
+`permission_denied`, `not_found`, all `site=frontend`); not-found and
+permission-denied produced byte-identical caller output; and an authorized
+read with the ERPNEXT credential absent still returned correct user-scoped
+rows. Source: the archived change's `verification-notes.md`, "Live evidence"
+section. This is recorded evidence, not certification. **Still not
+obtained:** adapter-level field-level `permlevel` enforcement (L-7), and
+forged-`site` and oversized-list rejection, which are offline-verified only.
+Non-strict User Permission on the test site also means NexMate can narrow
+but does not always strictly narrow, so the guarantee is "cannot widen".
 
 **This change does not reopen M7.** Release **NOT READY**, production writes
 **DENIED/PENDING** and private-data cloud/provider consent **NO GRANT** remain
 the authoritative M7 decisions, unchanged. No M8 was created.
 
-## Current position — 2026-09-26
+## Current position — 2026-09-27
 
 - **M2, M3, M4, M5, M6 and M7 are all CLOSED.** No milestone is active.
 - **No active OpenSpec change exists.** `openspec/changes/` contains only
   `archive/`.
 - **No M8 exists and none is implied.** No new implementation milestone has been
   approved or authorized.
-- Work since M7 has been **evidence and documentation stabilization** only.
+- Work since M7 has been **evidence and documentation stabilization**, plus one
+  separately approved implementation change: U5 `frappe-native-authorized-erpnext-reads`,
+  implemented, live-verified, archived and committed. U5 is **not** a new
+  milestone and **does not reopen M7**; release **NOT READY**, production writes
+  **DENIED/PENDING** and cloud/private-data consent **NO GRANT** are unchanged.
 - Any future implementation work requires a **separately approved OpenSpec
   change** with its own requirements, design, tasks and acceptance evidence.
-- Blocking the next gate are the unresolved register items **U1–U10** and the
-  unagreed thresholds **O2–O4**, all recorded in `ARCHITECTURE.md` and
-  `progress/BLOCKERS.md`. None is resolved.
+- Blocking the next gate are the unresolved register items **U1–U10** — with
+  U5 advanced only for ERPNext business-record reads — and the unagreed
+  thresholds **O2–O4**, all recorded in `ARCHITECTURE.md` and
+  `progress/BLOCKERS.md`. No U-item and no O-threshold is fully resolved; U1,
+  U3, U8, U9 and U10 remain untouched.
 
 ## Historical Phase 1–8 acceptance
 

@@ -4,12 +4,18 @@ List anything that stopped forward progress and needs a human decision.
 Remove an entry once resolved, and note the resolution in
 `progress/JOURNAL.md`.
 
-**Last updated:** 2026-09-26 — brought forward under the documentation-only
-OpenSpec change `reconcile-post-m7-project-state`, using only verified current
-evidence from the M2–M7 archives, the two post-M7 routing changes and
-`progress/CURRENT.md`. This pass ran no runtime test, model call, network check
-or live configuration inspection. **M7's governance decisions are reproduced
-below unchanged.**
+**Last updated:** 2026-09-27 — this header originally recorded a
+documentation-only OpenSpec change (`reconcile-post-m7-project-state`) that
+brought the file forward on 2026-09-26 from the M2–M7 archives, the two post-M7
+routing changes and `progress/CURRENT.md`; that pass ran no runtime test, model
+call, network check or live configuration inspection. The file was subsequently
+updated for U5 `frappe-native-authorized-erpnext-reads` (archived 2026-09-27,
+commit `486bf52`) using that change's archived `verification-notes.md`, which
+records project-owner-approved live evidence on test Bench site `frontend`:
+the two-user authorization matrix, the audit DocType migration, byte-identical
+anti-oracle output and a credential-absent authorized read. **M7's governance
+decisions are reproduced below unchanged** — release **NOT READY**, production
+writes **DENIED/PENDING**, cloud/private-data consent **NO GRANT**.
 
 ## Governance blockers — UNCHANGED
 
@@ -180,10 +186,20 @@ needs its own separately approved OpenSpec change and a controlled environment.
   design, so retrieval ACL parity is not delivered; multi-site tenancy (U1),
   DocType schema/metadata authorization, and the shared credential retained for
   the version lookup and legacy writes also remain open.
-- **U5 live two-user authorization evidence — NOT OBTAINED (approval-gated).**
-  The implementation is offline-verified only. The allowed/denied x user x
-  DocType x document matrix, and the audit DocType option migration, both
-  require explicit approval before test data is created or a migration is run.
+- **U5 live two-user authorization evidence — OBTAINED 2026-09-27; residual
+  sub-items remain.** On test Bench site `frontend` (Frappe 16.31.0 / ERPNext
+  16.33.0) under explicit project-owner approval: the allowed/denied × user ×
+  DocType × document matrix passed for both `u5-`-prefixed test users, covering
+  role authorization, User Permission, `if_owner` and DocShare; the audit
+  DocType option migration ran with exit 0 and no orphan deletion; field
+  minimization returned only requested fields; not-found and permission-denied
+  produced byte-identical caller output; and an authorized read with the
+  ERPNEXT credential absent succeeded. *Still open:* adapter-level field-level
+  `permlevel` enforcement (L-7), forged-`site` rejection live evidence, and
+  oversized-list rejection live evidence — the latter two are offline-verified
+  only. This is not exhaustive: the `u5-*` test fixtures remain in place on the
+  test site so the evidence stays reproducible, and removal steps are recorded
+  in the archived U5 `verification-notes.md`.
 - **Normal integration-user `Customer` schema access — NOT DEMONSTRATED.** The
   `GET /api/resource/DocType/Customer` 403 is an upstream Frappe permission
   outcome for that test user, recorded as still-not-demonstrated. No permission

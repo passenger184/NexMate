@@ -1,9 +1,9 @@
 # progress/CURRENT.md — Current State
 
-**Last updated:** 2026-09-27 — U5 `frappe-native-authorized-erpnext-reads` implemented and offline-verified (457 Python tests OK / 1 skipped, Node harness passing). ERPNext business-record reads are now authorized in the Frappe request process against `frappe.session.user`. Live two-user authorization evidence and the audit DocType migration are approval-gated and NOT yet performed. M7 remains closed and authoritative; no M8.
+**Last updated:** 2026-09-27 — U5 `frappe-native-authorized-erpnext-reads` implemented and verified (457 Python tests OK / 1 skipped, Node harness passing), then live-verified on test Bench site `frontend` (Frappe 16.31.0 / ERPNext 16.33.0) under explicit project-owner approval: migration exit 0 with all four NexMate DocTypes persisting and no orphan deletion, the two-user authorization matrix, byte-identical anti-oracle output, and a credential-absent authorized read. ERPNext business-record reads are now authorized in the Frappe request process against `frappe.session.user`. Still not obtained: adapter-level field-level `permlevel` (L-7), and forged-`site` and oversized-list rejection, which are offline-verified only. M7 remains closed and authoritative; no M8.
 **Prior:** 2026-09-26 — documentation reconciliation of post-M7 project state completed under the documentation-only OpenSpec change `reconcile-post-m7-project-state`. M7 **CLOSED** with final decisions: release NOT READY, production writes DENIED/PENDING (none authorized), cloud consent NO GRANT. No active implementation milestone and no M8. `ARCHITECTURE.md` reconciled forward to delivered M2–M6 plus the two post-M7 routing changes.
 **Current phase:** Historical Phases 1–8 functionally accepted 2026-08-24 with recorded exceptions; M2–M7 closed; no new phase or production-readiness acceptance.
-**Current task:** None active. Work since M7 has been evidence and documentation stabilization only. Further implementation work needs a separately approved OpenSpec change.
+**Current task:** None active. Work since M7 has been evidence and documentation stabilization, plus the completed and archived U5 change `frappe-native-authorized-erpnext-reads` (commit `486bf52`). No implementation change is in progress. Further implementation work needs a separately approved OpenSpec change.
 
 ## 2026-09-27 U5 frappe-native-authorized-erpnext-reads — implementation and offline evidence
 
@@ -30,8 +30,13 @@ business-data reads (`document`, `list`).
   mirrored allowlist before the request leaves inference.
 - Audit DocType gained `erpnext_read` plus `not_found`/`permission_denied`/
   `invalid_request` outcomes; `retrieval` and the existing outcomes preserved.
-  This is a DocType option change requiring a migration — **not yet run**
-  (approval-gated).
+  This was a DocType option change requiring a migration. The migration was
+  subsequently approved and run on 2026-09-27: `bench --site frontend migrate`
+  exited 0, all four NexMate DocTypes persisted, there was no orphan deletion,
+  the new action and outcomes are live, and `record_audit` persistence to the
+  database was verified. See the INCIDENT record in the archived U5
+  `verification-notes.md` for the pre-existing app-registration root cause and
+  repair.
 - Legacy `/tools/erpnext/{schema,document,list}` retained and marked deprecated
   with an explicit non-authorizing access policy; not removed.
 - Mode is orthogonal: the same user gets the same authorized result in either
@@ -41,12 +46,20 @@ business-data reads (`document`, `list`).
 `node --check` clean. Two test suites added: `tests/test_erpnext_read_adapter.py`
 (40) and `tests/test_u5_read_boundary.py` (25), plus a gateway read-seam class.
 
-**Limits / not yet obtained.** Live two-user allowed/denied authorization
-matrix (needs an approval-gated restricted user), User Permission / owner /
-sharing cases, the audit DocType migration, and an inference run with the
-ERPNEXT credential absent. `schema` reads remain on the retained legacy client
-per Decision 12. The shared credential is retained for the version lookup and
-legacy writes, so inference-side ERPNext risk is reduced, not eliminated. U1,
+**Live evidence obtained 2026-09-27** on test Bench site `frontend` (Frappe
+16.31.0 / ERPNext 16.33.0) under explicit project-owner approval: the two-user
+allowed/denied authorization matrix; the User Permission, owner (`if_owner`)
+and DocShare cases; the audit DocType migration; an authorized read with the
+ERPNEXT credential absent; and byte-identical caller output for not-found
+versus permission-denied. Source: the archived U5 `verification-notes.md`,
+"Live evidence" section. **Still unproven:** adapter-level field-level
+`permlevel` enforcement (L-7), forged-`site` rejection live evidence, and
+oversized-list rejection live evidence — the latter two are offline-verified
+only. `schema` reads remain on the retained legacy client per Decision 12. The
+shared credential is **not** eliminated: it is retained for the version
+lookup, the DocType schema read, the write path and the deprecated legacy
+`/tools/erpnext/*` routes, so inference-side ERPNext risk is reduced, not
+eliminated. U1,
 knowledge-corpus retrieval ACL parity, and the M7 production-readiness decision
 are unchanged.
 

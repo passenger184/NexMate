@@ -114,13 +114,27 @@ permission-denied produce one caller-indistinguishable outcome. Inference may
 request a read but cannot authorize or execute one.
 
 **This is evidence-bounded, not a certification.** It was implemented and
-offline-verified only; the live two-user authorization matrix is outstanding.
-It does not cover DocType schema/metadata reads (still on the retained legacy
+verified, and live verification was performed on 2026-09-27 on test Bench site
+`frontend` (Frappe 16.31.0 / ERPNext 16.33.0) under explicit project-owner
+approval: the two-user authorization matrix passed for role authorization,
+User Permission, `if_owner` and DocShare; the audit DocType migration exited 0
+with all four NexMate DocTypes persisting and no orphan deletion; not-found
+and permission-denied produced byte-identical caller output; and an authorized
+read with the ERPNEXT credential absent still returned correct user-scoped
+rows. Evidence remains bounded. **Still not obtained:** adapter-level
+field-level `permlevel` enforcement (L-7), and forged-`site` and
+oversized-list rejection, which are offline-verified only. Non-strict User
+Permission on the test site also means NexMate can narrow but does not always
+strictly narrow, so the guarantee is "cannot widen". It does not cover
+DocType schema/metadata reads (still on the retained legacy
 client), knowledge-corpus retrieval ACL, multi-site routing (U1), or the write
 path, and it does not reduce inference-side ERPNext risk to zero because the
-shared credential is retained for the version lookup and legacy writes. Mode is
+shared credential is retained for the version lookup, the schema read, the
+write path and the deprecated legacy `/tools/erpnext/*` routes. Mode is
 not ERPNext authorization. Nothing here grants production-write approval or
-cloud consent.
+cloud consent, and M7's release **NOT READY**, production-write
+**DENIED/PENDING** and cloud/private-data consent **NO GRANT** decisions are
+unchanged.
 
 ## Local-default data and all-call egress policy
 

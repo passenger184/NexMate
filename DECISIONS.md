@@ -549,7 +549,11 @@ intra-site ACL parity is still not delivered: this change governs ERPNext
 
 **Provenance:** approved by the project owner as a recorded architectural
 decision, implemented under the OpenSpec change
-`frappe-native-authorized-erpnext-reads`. Implementation and offline
-verification only; the live two-user authorization evidence and the audit
-DocType migration are separately approval-gated and not authorized by this
+`frappe-native-authorized-erpnext-reads`. This entry authorized
+implementation and offline verification only. The live two-user authorization
+evidence and the audit DocType migration were **not authorized by this
+entry**; they were separately approved by the project owner, performed on
+2026-09-27 on test Bench site `frontend`, and are recorded in that change's
+archived `verification-notes.md`. No production-readiness, release,
+production-write or cloud/provider consent was granted or implied by this
 entry.
