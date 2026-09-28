@@ -420,7 +420,7 @@ def _document_read(request: ERPNextReadRequest) -> dict[str, Any]:
     doc.check_permission("read")
     doc.apply_fieldlevel_read_permissions()
 
-    data = doc.as_dict(ignore_nulls=True)
+    data = doc.as_dict(no_nulls=True)
     projected: dict[str, Any] = {}
     for fname in request.fields:
         if fname not in data:

@@ -42,11 +42,11 @@ class _Doc:
         for fieldname in getattr(self.meta, "strip_fields", ()):  # type: ignore[attr-defined]
             self.__dict__.pop(fieldname, None)
 
-    def as_dict(self, ignore_nulls=False):
+    def as_dict(self, no_nulls=False):
         out = {}
         for key in self.meta.get_valid_fields():  # type: ignore[attr-defined]
             value = self.__dict__.get(key)
-            if ignore_nulls and value is None:
+            if no_nulls and value is None:
                 continue
             if value is None and key in getattr(self.meta, "check_fields", ()):  # type: ignore[attr-defined]
                 value = 0  # Check coercion: None -> 0
