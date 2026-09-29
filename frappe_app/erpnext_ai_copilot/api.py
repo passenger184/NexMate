@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 import frappe
 import requests
 
-from erpnext_ai_copilot import conversations, erpnext_read
+from erpnext_ai_copilot import conversations, doctype_meta, erpnext_read, policy_limits
 
 
 logger = logging.getLogger("nexmate.gateway")
@@ -17,7 +17,11 @@ MAX_QUESTION_CHARS = 2000
 CONNECT_TIMEOUT_SECONDS = 5
 DEFAULT_INFERENCE_TIMEOUT_SECONDS = 300
 MAX_INFERENCE_TIMEOUT_SECONDS = 900
-ALLOWED_FORM_FIELDS = frozenset({"cmd", "question", "conversation_id", "mode"})
+# `mode` is deliberately absent: capability is derived from the session
+# user's roles, so a browser-supplied mode is refused as an unsupported field
+# rather than accepted and ignored. The Desk selector is already disabled
+# client-side.
+ALLOWED_FORM_FIELDS = frozenset({"cmd", "question", "conversation_id"})
 CONVERSATION_FORM_FIELDS = frozenset({"cmd", "conversation_id"})
 RESPONSE_FIELDS = (
     "answer", "sources", "confidence", "route", "mode", "conversation_id", "version_info",
@@ -29,10 +33,10 @@ RESPONSE_FIELDS = (
 # minimized result. These names are protocol constants, not caller input.
 READ_REQUEST_FIELD = "read_request"
 AUTHORIZED_CONTEXT_FIELD = "authorized_context"
-#: Bounded round trips so a misbehaving peer cannot loop the request.
-MAX_READ_ROUNDS = 3
-#: Hard ceiling on the authorized payload that may cross toward inference.
-MAX_AUTHORIZED_CONTEXT_BYTES = 64 * 1024
+# NOTE: the round budget and payload bounds are administrator-configured
+# within immutable ceilings; see ``policy_limits``. There are deliberately no
+# numeric bound constants here — a second copy would drift from the single
+# source of truth.
 
 
 def _valid_identity(value: object) -> bool:
@@ -75,21 +79,86 @@ def _inference_timeout() -> float | None:
     return float(value)
 
 
-def _mode_for_user(user: str) -> str:
-    mapping = frappe.conf.get("nexmate_developer_roles", [])
+def _user_roles(user: str) -> list[str]:
+    """The authenticated user's actual Frappe roles, read live and once.
+
+    Fails closed to an empty list. Capability derivation and authorization-scope
+    construction both consume this single per-request read rather than each
+    calling ``frappe.get_roles()`` separately.
+    """
+    try:
+        return [role for role in frappe.get_roles(user)
+                if _valid_identity(role)]
+    except Exception:
+        # A raising role lookup never yields elevation.
+        logger.warning("role_lookup_failed")
+        return []
+
+
+#: Sentinel for "caller did not supply a resolved mapping". Distinct from
+#: ``None``, which means "resolved and unusable" and must not trigger a
+#: second resolution (and a second warning).
+_UNSET_MAPPING = object()
+
+
+def capability_for_user(user: str, roles: list[str] | None = None,
+                        mapping=_UNSET_MAPPING) -> str:
+    """Derive the live NexMate capability for ``user``.
+
+    Only an explicit matching role selects ``developer``; everything else is
+    ``employee``. There is no implicit System Manager or Administrator
+    elevation, and no caching: the Frappe Role store is the sole source of
+    truth and this runs on every request. Malformed configuration or a failing
+    role lookup fails closed to ``employee``.
+
+    The role list resolves through :func:`_developer_role_mapping`, the one
+    authoritative path: ``NexMate Settings`` when configured, otherwise the
+    ``site_config`` value. Callers that already resolved it (one settings read
+    per request) pass it as ``mapping`` — including an unusable (``None``)
+    result, which must not trigger a second resolution and a second warning.
+    """
+    if mapping is _UNSET_MAPPING:
+        mapping = _developer_role_mapping()
+    if not mapping:
+        return "employee"
+    actual = _user_roles(user) if roles is None else roles
+    return "developer" if any(role in mapping for role in actual) else "employee"
+
+
+def _developer_role_mapping():
+    """Resolve the effective developer-role list, or None when unusable.
+
+    Single authoritative path for role-list resolution (design D19): Settings
+    when proven saved, ``site_config`` as fallback for genuine absence only.
+    Returns None for a malformed mapping (after logging) and for an
+    unreadable role source (after a distinct log line) so callers skip the
+    role lookup entirely and fail closed; returns a (possibly empty) list
+    otherwise. An empty list means ``employee`` for everyone, with no
+    warning: it is a valid configured state.
+    """
+    mapping, source = policy_limits.resolve_developer_roles()
+    if source == "unavailable":
+        # The role source could not be read at all. This is a failure, not
+        # absence: never fall back to site_config on an unreadable store.
+        # (A malformed site_config value arrives here as (None, "site_config")
+        # instead, and takes the invalid branch below.)
+        logger.warning("developer_role_source_unavailable")
+        return None
     if (not isinstance(mapping, list)
             or not all(_valid_identity(role) for role in mapping)):
         logger.warning("invalid_developer_roles_config")
-        return "employee"
-    if not mapping:
-        return "employee"
-    return "developer" if any(role in mapping for role in frappe.get_roles(user)) else "employee"
+        return None
+    return mapping
+
+
+# Retained name for existing callers and tests.
+_mode_for_user = capability_for_user
 
 
 SCOPE_DERIVED_BY_MARKER = "frappe-gateway"
 
 
-def _authz_scope(user: str, site: str, mode: str) -> dict:
+def _authz_scope(user: str, site: str, mode: str, roles: list[str] | None = None) -> dict:
     """Frappe-derived retrieval authorization scope (M4 acl-aware-retrieval).
 
     Authoritative by construction: site from the server, tiers from the
@@ -97,17 +166,16 @@ def _authz_scope(user: str, site: str, mode: str) -> dict:
     roles from the authenticated user's actual roles (developer only).
     Inference validates structure and consistency only; it never grants
     authorization.
+
+    ``roles`` reuses the single per-request role read taken for capability
+    derivation so the request performs one lookup, not two.
     """
     if mode == "employee":
         return {"site": site, "tiers": ["public"], "roles": [],
                 "derived_by": SCOPE_DERIVED_BY_MARKER}
-    try:
-        roles = [role for role in frappe.get_roles(user)
-                 if _valid_identity(role)]
-    except Exception:
-        roles = []
+    actual = _user_roles(user) if roles is None else roles
     return {"site": site, "tiers": ["public", "site", "restricted"],
-            "roles": roles, "derived_by": SCOPE_DERIVED_BY_MARKER}
+            "roles": list(actual or []), "derived_by": SCOPE_DERIVED_BY_MARKER}
 
 
 def _forward(url: str, key: str, envelope: dict, read_timeout: float) -> dict | str:
@@ -170,12 +238,38 @@ def _authenticated_user() -> str:
     return user
 
 
+def _effective_read_bounds():
+    """Resolve the effective business-read bounds for one decision.
+
+    Each bound is ``min(configured value or default, immutable service
+    ceiling)``. An administrator may narrow operational volume freely but can
+    never raise a bound past its ceiling, which is enforced here
+    independently of save-time Settings validation.
+
+    The adapter bounds are included explicitly as a second, final clamp. They
+    now sit exactly at the approved business-read ceilings, so every
+    administrator value up to the ceiling flows through untouched and the
+    adapter remains the ultimate backstop: no request is ever sent to it that
+    it would refuse for a bound reason. These are operational safety ceilings,
+    not authorization, and nothing here widens what Frappe permits.
+    """
+    rows, fields, size = policy_limits.effective_read_bounds()
+    return (
+        min(rows, erpnext_read.MAX_LIST_LIMIT),
+        min(fields, erpnext_read.MAX_FIELD_COUNT),
+        min(size, erpnext_read.MAX_RESULT_BYTES),
+    )
+
+
 def _authorized_read(requested: dict, correlation: str, request_id: str) -> dict:
     """Execute one Frappe-native authorized ERPNext read for the session user.
 
     The request originated in inference and is therefore untrusted. It is
     validated and authorized entirely in-process by the adapter; this function
-    only hands it over and bounds what comes back.
+    only hands it over and bounds what comes back. Before handing over, the
+    requested row and field counts are checked against the resolved effective
+    bounds so a narrowed administrator policy is enforced here as well as in
+    the adapter; the adapter's own bounds still apply unchanged.
 
     On any refusal the anti-oracle collapse is applied so the caller cannot
     distinguish not-found from permission-denied. The internal distinction is
@@ -184,6 +278,17 @@ def _authorized_read(requested: dict, correlation: str, request_id: str) -> dict
     payload = dict(requested)
     payload.setdefault("correlation", correlation)
     payload.setdefault("request_id", request_id)
+    max_rows, max_fields, max_bytes = _effective_read_bounds()
+    if payload.get("operation") == "list":
+        requested_limit = payload.get("limit")
+        if (isinstance(requested_limit, int) and not isinstance(requested_limit, bool)
+                and requested_limit > max_rows):
+            return {"_denied": erpnext_read.collapse_for_caller(
+                erpnext_read.InvalidRequest("exceeds the configured read bound"))}
+    requested_fields = payload.get("fields")
+    if isinstance(requested_fields, list) and len(requested_fields) > max_fields:
+        return {"_denied": erpnext_read.collapse_for_caller(
+            erpnext_read.InvalidRequest("exceeds the configured read bound"))}
     try:
         context = erpnext_read.attempt_read(payload)
     except erpnext_read.ReadRefusal as refusal:
@@ -194,11 +299,52 @@ def _authorized_read(requested: dict, correlation: str, request_id: str) -> dict
         return {"_denied": erpnext_read.collapse_for_caller(
             erpnext_read.AuditUnavailable("read unavailable"))}
     serialized = json.dumps(context, default=str)
-    if len(serialized) > MAX_AUTHORIZED_CONTEXT_BYTES:
+    if len(serialized) > max_bytes:
         logger.warning("authorized_context_too_large")
         return {"_denied": erpnext_read.collapse_for_caller(
-            erpnext_read.InvalidRequest("result exceeds the authorized payload bound"))}
+            erpnext_read.InvalidRequest("result exceeds the configured payload bound"))}
     return {"_context": context}
+
+
+def _authorized_metadata(requested: dict, request_id: str) -> dict:
+    """Serve one capability- and policy-gated metadata request.
+
+    Dispatch is on the requested kind: a metadata request is authorized by
+    :mod:`doctype_meta` and is **never** passed to the business-record read
+    adapter, whose request contract deliberately excludes metadata operations.
+    The two surfaces stay separate.
+
+    The resolved effective bounds are re-checked here alongside the module's
+    own enforcement, so an over-ceiling projection cannot pass the control
+    plane only to be rejected downstream.
+    """
+    payload = dict(requested or {})
+    payload.pop("kind", None)
+    try:
+        projection = doctype_meta.attempt_metadata(payload)
+    except doctype_meta.MetadataRefusal as refusal:
+        return {"_denied": doctype_meta.collapse_for_caller(refusal)}
+    except Exception:
+        # Unexpected failure: fail closed, no metadata returned.
+        logger.warning("authorized_metadata_failed")
+        return {"_denied": doctype_meta.collapse_for_caller(
+            doctype_meta.AuditUnavailable("metadata unavailable"))}
+    max_fields, max_bytes = policy_limits.effective_metadata_bounds()
+    if len(projection["fields"]) > max_fields:
+        logger.warning("authorized_metadata_too_large")
+        return {"_denied": doctype_meta.collapse_for_caller(
+            doctype_meta.OversizedProjection("exceeds the configured field bound"))}
+    serialized = json.dumps(projection, default=str)
+    if len(serialized) > max_bytes:
+        logger.warning("authorized_metadata_too_large")
+        return {"_denied": doctype_meta.collapse_for_caller(
+            doctype_meta.OversizedProjection("exceeds the configured payload bound"))}
+    return {"_context": {
+        "doctype": projection["doctype"],
+        "operation": "schema",
+        "field_count": len(projection["fields"]),
+        "fields": projection["fields"],
+    }}
 
 
 def _refuse_extra_fields(allowed: frozenset) -> None:
@@ -250,7 +396,7 @@ def start_conversation() -> dict:
     """Create an owned thread for the authenticated user; returns its id."""
     _refuse_extra_fields(CONVERSATION_FORM_FIELDS)
     user, site, _key, _url, _timeout = _gateway_context()
-    name = conversations.start_conversation(user, site, _mode_for_user(user))
+    name = conversations.start_conversation(user, site, capability_for_user(user))
     return {"conversation_id": name}
 
 
@@ -281,15 +427,22 @@ def ask(question: str, conversation_id: str | None = None) -> dict:
     user, site, key, url, read_timeout = _gateway_context_for_ask()
     if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_CHARS:
         frappe.throw("Invalid chat question.")
+    # One live role read per request, shared by capability derivation and
+    # authorization-scope construction. The role list resolves through the one
+    # authoritative path (Settings when configured, site_config as fallback);
+    # an empty or malformed mapping is decided without consulting roles at
+    # all, so no lookup is performed.
+    mapping = _developer_role_mapping()
+    roles = _user_roles(user) if mapping else None
     envelope = {
         "question": question,
         "user": user,
         "site": site,
-        "mode": _mode_for_user(user),
-        "execution_scope": "chat-only",
+        "mode": capability_for_user(user, roles, mapping),
+        "execution_scope": "frappe-attributed",
     }
     envelope["scope"] = _authz_scope(
-        user, site, envelope["mode"])
+        user, site, envelope["mode"], roles)
     if conversation_id is not None:
         name = _conversation_id_argument(conversation_id)
         prior = _owned(conversations.read_turns, name)
@@ -305,20 +458,30 @@ def ask(question: str, conversation_id: str | None = None) -> dict:
             "id": name, "owner": user, "site": site, "turns": forward,
         }
     result = None
-    for _round in range(MAX_READ_ROUNDS):
+    # The round budget resolves per ask from administrator settings within
+    # its immutable ceiling; the default preserves current behavior.
+    max_rounds = policy_limits.effective_rounds()
+    for _round in range(max_rounds):
         result = _forward(url, key, envelope, read_timeout)
         if isinstance(result, str):
             logger.warning(result)
             frappe.throw(result)
         if "_read_request" in result:
-            # Inference asked for ERPNext business data. Frappe authorizes and
-            # performs the read itself under the session user, then returns
-            # only the authorized, minimized context.
-            outcome = _authorized_read(
-                result["_read_request"],
-                correlation=(envelope.get("conversation") or {}).get("id") or "nexmate-read",
-                request_id=f"{_round}",
-            )
+            requested = result["_read_request"]
+            # Dispatch on kind. A metadata request is authorized by the
+            # metadata module under capability and the site policy; it is
+            # never passed to the business-record read adapter, whose request
+            # contract excludes metadata operations. Business reads keep their
+            # existing path unchanged.
+            is_metadata = isinstance(requested, dict) and requested.get("kind") == "schema"
+            if is_metadata:
+                outcome = _authorized_metadata(requested, request_id=f"{_round}")
+            else:
+                outcome = _authorized_read(
+                    requested,
+                    correlation=(envelope.get("conversation") or {}).get("id") or "nexmate-read",
+                    request_id=f"{_round}",
+                )
             if "_denied" in outcome:
                 result = outcome["_denied"]
                 break

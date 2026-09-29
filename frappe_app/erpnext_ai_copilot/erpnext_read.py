@@ -42,17 +42,19 @@ except Exception:  # pragma: no cover - offline import guard
 #: read-request validation).
 SUPPORTED_OPERATIONS = frozenset({"document", "list"})
 
-#: Adapter-level list bound. Intentionally stricter than the general
-#: ``erpnext_read`` tool contract maximum of 100. See verification-notes.md.
-MAX_LIST_LIMIT = 20
+#: Adapter-level list bound. Matches the general ``erpnext_read`` tool contract
+#: maximum of 100 and the approved immutable service ceiling, so an
+#: administrator-configured value up to the ceiling flows end to end.
+#: See verification-notes.md.
+MAX_LIST_LIMIT = 100
 DEFAULT_LIST_LIMIT = 20
 
 #: Bounds on request components.
 MAX_DOCUMENT_NAME_CHARS = 140
-MAX_FIELD_COUNT = 20
+MAX_FIELD_COUNT = 50
 MAX_FILTER_KEYS = 8
 MAX_FILTER_VALUES = 20
-MAX_RESULT_BYTES = 64 * 1024
+MAX_RESULT_BYTES = 128 * 1024
 
 #: Business DocTypes this adapter is approved to read. A request for any other
 #: DocType is rejected before any data access. This is reviewed configuration,

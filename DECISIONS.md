@@ -557,3 +557,63 @@ entry**; they were separately approved by the project owner, performed on
 archived `verification-notes.md`. No production-readiness, release,
 production-write or cloud/provider consent was granted or implied by this
 entry.
+
+## [2026-09-29] Retire `chat-only`, Developer capability, Frappe-native configurable metadata policy
+
+**Decision:** Replace the fixed `chat-only` execution scope with a single generic
+authenticated scope (`frappe-attributed`) that grants nothing by itself. Derive
+an Employee/Developer capability live from the session user's Frappe roles
+against `nexmate_developer_roles`, carried in the existing `mode` envelope
+field; no second capability field. Serve DocType metadata in-process via
+`frappe.get_meta()` under capability first, then DocType existence, then the
+immutable `istable`/`issingle` exclusions, then the site's
+administrator-controlled metadata access policy (`NexMate Settings`,
+`all | allowlist`, read uncached, fail-closed on every ambiguous state).
+Capability is distinct from configuration authority: only System Manager may
+write the policy. Remove the three legacy `/tools/erpnext/*` routes, refuse
+`authorized_context`/`scope`/`conversation` without a complete valid envelope,
+remove the inference-side employee schema short-circuit, and split the
+descriptive capability registry. Metadata uses a dedicated `doctype_schema`
+audit action with fail-closed audit-result handling; `erpnext_read.py` and
+`audit.py` are unchanged. This supersedes the `:422` chat-only decision above:
+the gateway is no longer chat-only, but every operation keeps its own explicit
+backend enforcement point.
+
+**Why this shape:** the U5 business-record boundary is correct and evidenced, so
+the remaining work is unblocking it and replacing a blanket deny with a model
+enforced in Frappe. A hard-coded DocType list would make every site identical
+and require a deployment to change; an administrator-controlled per-site policy
+matches Frappe's own settings-Single convention. `frappe.has_permission()` is
+deliberately not the metadata gate, because the permission engine allows
+`Administrator` unconditionally as its first check, which would short-circuit
+any gate placed after it — hence capability is evaluated first.
+
+**Alternatives rejected:** a second `capability` wire field (two fields asserting
+one fact, plus a second DocType migration for `Conversation.persona`);
+`site_config.json` for the policy (not Desk-editable, unaudited, 60-second
+per-process cache with no automatic invalidation); extending core
+`System Settings` (couples an ERPNext app to a 120-field core form); keeping an
+inference-side schema check as defense-in-depth (a second trust boundary that
+also blocks the control plane from auditing the decision).
+
+**Consequences and limits.** `all` policy mode exposes structural information
+from every eligible DocType including custom applications; it is a
+development/testing posture and is not automatically appropriate for production.
+The declared projection bound (100 fields) refuses real transaction DocTypes
+with larger field counts (observed live: Item 132, Sales Order 170, Sales
+Invoice 233) — a product decision is still required on whether to raise it.
+The shared credential is retained for the write path and version lookup only.
+Three additive DocType synchronizations were required (`doctype_schema` action,
+`NexMate Settings`, `NexMate Metadata DocType Rule`); no data migration. The
+migration ran 2026-09-29 on test Bench site `frontend` after the recorded
+`installed_apps` inconsistency was resolved; evidence is in the change's
+`verification-notes.md`. Nothing here grants production-write approval or cloud
+consent; M7 remains authoritative.
+
+**Provenance:** OpenSpec change `retire-chat-only-developer-capability-model`,
+reviewed through three read-only passes (consistency review, D-1..D-8
+architectural review, implementation-readiness review) with all contradictions
+resolved in the package before implementation. Implementation approved by the
+project owner; migration approved subject to the backup gate, executed
+2026-09-29 after a verified backup with checksums. No production-readiness,
+release, production-write or cloud/provider consent granted or implied.

@@ -5,6 +5,17 @@ entry is derived from implemented, wired-up functionality — the
 "what can you do?" answer and clarification options are rendered from
 this list, never from model memory.
 
+This registry is **descriptive only**. It says which features exist for
+a capability; it is never the authorization mechanism. Metadata access
+is authorized in the Frappe control plane by the session user's live
+capability plus the administrator's per-site metadata access policy, so
+a capability reply describes availability and never asserts that a
+particular DocType will be permitted.
+
+Metadata is a separate capability from business-record lookup, so a
+capability reply cannot advertise to an employee something they will be
+refused.
+
 To add a future capability: append one dict with the fields below. No
 router redesign needed — the orchestrator matches on `route`.
 """
@@ -27,11 +38,12 @@ CAPABILITIES: list[dict[str, Any]] = [
         "example": "How do I create a Sales Invoice?",
     },
     {
-        "id": "live_data",
-        "label": "Live ERPNext data lookups",
+        "id": "live_data_records",
+        "label": "Authorized ERPNext records",
         "description": (
-            "Look up schemas, documents, lists, and counts on your "
-            "connected ERPNext instance."
+            "Look up documents, lists and counts you are permitted to read. "
+            "Access is decided by your own ERPNext permissions, not by your "
+            "NexMate role."
         ),
         "route": "erpnext",
         "needs_retrieval": False,
@@ -39,6 +51,21 @@ CAPABILITIES: list[dict[str, Any]] = [
         "needs_auth": False,
         "modes": ["developer", "employee"],
         "example": "How many submitted Sales Orders are there?",
+    },
+    {
+        "id": "doctype_schema",
+        "label": "DocType schema",
+        "description": (
+            "Inspect the field structure of a DocType on your ERPNext site. "
+            "Only structural attributes are returned — never field values, "
+            "Select options, or permission settings."
+        ),
+        "route": "erpnext",
+        "needs_retrieval": False,
+        "needs_live_data": True,
+        "needs_auth": False,
+        "modes": ["developer"],
+        "example": "What fields does the Customer DocType have?",
     },
     {
         "id": "code",
@@ -77,18 +104,17 @@ def render_clarification(topic: str | None = None) -> str:
     """Targeted clarification whose options name only real capabilities.
 
     `topic` is a short noun phrase from the user's message (or None).
-    Every option maps to a registry capability, so we never offer what
-    the system cannot handle.
+    Each option maps to a registry capability, so we never offer what the
+    system cannot handle.
     """
     subject = f"“{topic}”" if topic else "that"
     return (
         f"I want to make sure I help with the right thing — {subject} "
         f"could mean a few different things. Are you asking:\n\n"
         f"1. How {subject} works in ERPNext (documentation)?\n"
-        f"2. About your live {subject} data on the connected instance "
+        f"2. About {subject} in your live {subject} data on the connected instance "
         f"(lists, statuses, counts)?\n"
-        f"3. About {subject} in this project's source code "
-        f"(developer mode only)?"
+        f"3. About {subject} in this project's source code (developer mode only)?"
     )
 
 

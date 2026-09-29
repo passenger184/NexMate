@@ -4,7 +4,9 @@ A tool-using AI assistant for Frappe v16 / ERPNext v16, with a Desk sidebar
 implementation and standalone browser preview. The current single-project
 system includes cited public/company retrieval and legacy code/ERPNext tools.
 The implemented `authenticated-frappe-control-plane` boundary makes Desk
-chat-only through authenticated Frappe; legacy tools remain separate behind
+operational through authenticated Frappe with a generic authenticated scope
+that grants nothing by itself; each operation keeps its own backend
+enforcement point. Legacy tools remain separate behind
 the inference authentication gate. Conversations still use transitional
 caller-selected JSON sessions, not authenticated ownership. Historical
 Phases 1–8 acceptance is not production readiness; final boundary reviews
@@ -228,17 +230,23 @@ Conversational entry point with seven response routes: `rag`, `code`,
 (`service/main.py:234`). Exact fast paths and NLU precede the three-way
 task router; direct tool endpoints also remain available. Responses carry
 `route`, `route_how`, and `version_info` (which can report unavailable).
-`mode: "employee"` selects a public-docs persona and orchestration guards
-against code/schema routes; it is caller-supplied, not authenticated
-permission enforcement. Conversation threads are Frappe-owned records
+`mode: "employee"` selects a public-docs persona; the capability is derived
+from the authenticated user's Frappe roles against `nexmate_developer_roles`
+and is not caller-supplied permission enforcement. Developer metadata
+inspection is additionally governed by the administrator-controlled
+`NexMate Settings` policy (`all | allowlist`), the one Desk-editable NexMate
+surface — distinct from the site-configuration keys below. Conversation threads are Frappe-owned records
 (`NexMate Conversation`, bound to authenticated user + site); `ask()` takes
 an optional owned `conversation_id` and is stateless without one.
 A gateway envelope is different: authenticated service credentials plus
-validated user/site/mode and exact `execution_scope="chat-only"` are required
+validated user/site/mode and exact `execution_scope="frappe-attributed"` are required
 before history or routing. Partial/invalid envelopes and site mismatch
 refuse without legacy downgrade, even in development. Backend dispatch
-blocks code and ERPNext handlers in both personas, including follow-ups and
-degraded routing, and suppresses incidental live version calls. Retrieval
+denies the `code` route pre-entry in both personas and lets `erpnext` turns
+reach the Frappe control plane, where business reads are authorized by U5 and
+metadata by capability plus the administrator policy; denials precede
+execution, including for follow-ups and degraded routing, and incidental live
+version calls are suppressed. Retrieval
 is authorization-scoped per the paragraph above; the gateway envelope also
 carries the Frappe-derived scope, validated before history or routing.
 

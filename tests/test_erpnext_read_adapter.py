@@ -313,16 +313,51 @@ class StrictValidation(AdapterBase):
         )
         self.assertEqual(req.filters, {"disabled": 0, "customer_name": ["A", "B"]})
 
-    def test_4_6_adapter_limit_is_stricter_than_contract_maximum(self):
+    def test_4_6_adapter_limit_matches_contract_maximum(self):
         from tools.contracts import contract_for
 
         contract_max = contract_for("erpnext_read")["bounded_inputs"]["limit"]["maximum"]
         self.assertEqual(contract_max, 100)
-        self.assertLess(er.MAX_LIST_LIMIT, contract_max)
-        self.assertEqual(er.MAX_LIST_LIMIT, 20)
+        # The adapter backstop now matches the approved immutable service
+        # ceiling: values up to 100 are accepted, anything above is refused.
+        self.assertEqual(er.MAX_LIST_LIMIT, 100)
         self.with_frappe(metas=DEFAULT_META)
+        ok = er.build_request({"operation": "list", "doctype": "Customer",
+                               "fields": ["name"], "limit": contract_max})
+        self.assertEqual(ok.limit, 100)
         with self.assertRaises(er.InvalidRequest):
-            er.build_request({"operation": "list", "doctype": "Customer", "fields": ["name"], "limit": contract_max})
+            er.build_request({"operation": "list", "doctype": "Customer",
+                              "fields": ["name"], "limit": contract_max + 1})
+
+    def test_4_6_field_count_matches_service_ceiling(self):
+        wide = tuple(f"f{i:02d}" for i in range(60))
+        self.assertEqual(er.MAX_FIELD_COUNT, 50)
+        self.with_frappe(metas={**DEFAULT_META, "Wide": _Meta("Wide")})
+        with mock.patch.dict(er.ALLOWED_DOCTYPES, {"Wide": wide}):
+            ok = er.build_request({"operation": "list", "doctype": "Wide",
+                                   "fields": list(wide[:50])})
+            self.assertEqual(len(ok.fields), 50)
+            with self.assertRaises(er.InvalidRequest):
+                er.build_request({"operation": "list", "doctype": "Wide",
+                                  "fields": list(wide[:51])})
+
+    def test_4_6_result_bytes_match_service_ceiling(self):
+        self.assertEqual(er.MAX_RESULT_BYTES, 128 * 1024)
+        # Just within the ceiling: accepted.
+        fitting = {"rows": [{"name": "X" * 60000, "customer_name": "Y" * 60000}],
+                   "row_count": 1}
+        self.assertLess(
+            len(str(fitting)) + len(str(["name", "customer_name"])),
+            er.MAX_RESULT_BYTES)
+        er._guard_result_size(fitting, ["name", "customer_name"])
+        # Beyond the ceiling: refused, never truncated.
+        overflowing = {"rows": [{"name": "X" * 70000, "customer_name": "Y" * 70000}],
+                       "row_count": 1}
+        self.assertGreater(
+            len(str(overflowing)) + len(str(["name", "customer_name"])),
+            er.MAX_RESULT_BYTES)
+        with self.assertRaises(er.InvalidRequest):
+            er._guard_result_size(overflowing, ["name", "customer_name"])
 
     def test_4_7_typed_error_reason_is_bounded_and_clean(self):
         self.with_frappe(metas=DEFAULT_META)

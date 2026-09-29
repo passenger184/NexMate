@@ -87,14 +87,87 @@ SCOPE_KEYS = frozenset({"site", "tiers", "roles", "derived_by"})
 SCOPE_TIERS = ("public", "site", "restricted")
 SCOPE_DERIVED_BY_MARKER = "frappe-gateway"
 
+#: The single generic authenticated execution scope. It asserts only that a
+#: credentialed, Frappe-attributed request may reach orchestration. It grants
+#: no ERPNext access, no metadata access, no write access, no code execution,
+#: and no tool execution; each of those is separately gated (design D1).
+EXECUTION_SCOPE_AUTHENTICATED = "frappe-attributed"
+
 # --- U5 authorized ERPNext context ----------------------------------------
 # Inference CONSUMES this Frappe-produced, already-authorized data. It is
 # structure-checked here so a malformed or oversized payload cannot be used.
 # This check NEVER grants authorization; Frappe already performed it.
 AUTHORIZED_CONTEXT_KEYS = frozenset({"doctype", "operation", "fields_returned", "row_count", "data"})
 AUTHORIZED_CONTEXT_OPERATIONS = ("document", "list")
-MAX_AUTHORIZED_CONTEXT_BYTES = 64 * 1024
-MAX_AUTHORIZED_CONTEXT_ROWS = 20
+#: Immutable service ceilings for business-read payloads, mirroring the
+#: producer's approved immutable ceilings in ``erpnext_read.py``
+#: (``MAX_LIST_LIMIT``, ``MAX_FIELD_COUNT``, ``MAX_RESULT_BYTES``).
+#:
+#: A consumer must never be NARROWER than its producer: the Frappe control
+#: plane resolves each bound to ``min(administrator value, service ceiling)``
+#: and admits anything up to the ceiling, so a payload this validator refused
+#: would be a Frappe-authorized read the assistant silently lost. These are
+#: ceilings, not administrator settings — narrowing still happens upstream in
+#: ``NexMate Settings``, and the defaults (20 rows / 20 fields / 64 KiB) are
+#: what applies until an administrator raises them.
+MAX_AUTHORIZED_CONTEXT_ROWS = 100
+MAX_AUTHORIZED_CONTEXT_FIELDS = 50
+MAX_AUTHORIZED_CONTEXT_BYTES = 131072
+
+# --- Capability- and policy-gated metadata --------------------------------
+# Metadata is a SEPARATE contract from the business read, not a new business
+# read. It is admitted alongside the existing keys with its own declared shape
+# and its own bounds, so the two contracts are never merged (design D11).
+METADATA_CONTEXT_KEYS = frozenset({"doctype", "operation", "field_count", "fields"})
+METADATA_OPERATION = "schema"
+#: Immutable service ceilings for metadata payloads. These are deliberately
+#: SEPARATE constants from the business-read bounds above, even where values
+#: could coincide: sharing one constant would re-couple the two contracts.
+#: They are ceilings, not administrator settings — the Frappe control plane
+#: resolves the effective (possibly narrower) bounds per decision, and this
+#: validator accepts anything within the ceilings so a Frappe-accepted payload
+#: is never rejected here with HTTP 422.
+METADATA_FIELDS_CEILING = 500
+METADATA_BYTES_CEILING = 131072
+#: Closed projection. Inference may not widen or narrow this: the control plane
+#: produced it, and anything outside these attributes did not come from the
+#: declared five-field projection.
+METADATA_PROJECTION_KEYS = frozenset({"fieldname", "fieldtype", "label", "reqd", "read_only"})
+
+
+def validate_metadata_context(context: object) -> dict:
+    """Structure and bound validation for Frappe-produced metadata context.
+
+    Frappe is authoritative for the metadata decision; this check never grants
+    it. It confirms the declared shape, a supported operation, bounded field
+    count and size, and that every projected entry carries exactly the
+    five declared structural attributes and no business data.
+    """
+    if not isinstance(context, dict) or set(context) != METADATA_CONTEXT_KEYS:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    if context.get("operation") != METADATA_OPERATION:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    doctype = context.get("doctype")
+    if not isinstance(doctype, str) or not doctype or len(doctype) > 140:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    field_count = context.get("field_count")
+    if (not isinstance(field_count, int) or isinstance(field_count, bool)
+            or field_count < 0 or field_count > METADATA_FIELDS_CEILING):
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    fields = context.get("fields")
+    if not isinstance(fields, list) or len(fields) > METADATA_FIELDS_CEILING:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    if len(fields) != field_count:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    for entry in fields:
+        if not isinstance(entry, dict) or set(entry) != METADATA_PROJECTION_KEYS:
+            raise HTTPException(status_code=422, detail="invalid_authorized_context")
+        if not all(isinstance(entry.get(k), (str, bool, int))
+                   for k in METADATA_PROJECTION_KEYS):
+            raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    if len(json.dumps(context, default=str)) > METADATA_BYTES_CEILING:
+        raise HTTPException(status_code=422, detail="invalid_authorized_context")
+    return context
 
 
 def validate_authorized_context(context: object) -> dict:
@@ -104,7 +177,17 @@ def validate_authorized_context(context: object) -> dict:
     grants it. It confirms the frozen shape, a supported operation, bounded
     field/row counts and a bounded serialized size, and rejects anything that
     looks like a credential or an authorization-subject override.
+
+    A metadata context is a distinct contract with its own declared shape and
+    bounds, dispatched here rather than widening the business-read contract.
+    The business-read bounds are the producer's approved immutable ceilings
+    (100 rows / 50 fields / 131072 bytes), not administrator settings: the
+    effective, possibly narrower, limits are resolved by the Frappe control
+    plane before a payload ever reaches here.
     """
+    if (isinstance(context, dict)
+            and context.get("operation") == METADATA_OPERATION):
+        return validate_metadata_context(context)
     if not isinstance(context, dict) or set(context) != AUTHORIZED_CONTEXT_KEYS:
         raise HTTPException(status_code=422, detail="invalid_authorized_context")
     if context.get("operation") not in AUTHORIZED_CONTEXT_OPERATIONS:
@@ -114,7 +197,7 @@ def validate_authorized_context(context: object) -> dict:
         raise HTTPException(status_code=422, detail="invalid_authorized_context")
     fields_returned = context.get("fields_returned")
     if (not isinstance(fields_returned, list)
-            or len(fields_returned) > 20
+            or len(fields_returned) > MAX_AUTHORIZED_CONTEXT_FIELDS
             or not all(isinstance(f, str) and 0 < len(f) <= 140 for f in fields_returned)):
         raise HTTPException(status_code=422, detail="invalid_authorized_context")
     row_count = context.get("row_count")
@@ -216,6 +299,12 @@ def validate_gateway_envelope(payload: dict, supplied: set[str],
                               request: Request) -> bool:
     envelope_fields = {"user", "site", "execution_scope"}
     if not supplied & envelope_fields:
+        # No gateway envelope. Refuse any field that asserts Frappe-derived
+        # authorization BEFORE returning, rather than letting it through
+        # unvalidated. These are not validated as if a user existed — no user
+        # exists to validate them against — they are refused outright.
+        if supplied & AUTHORIZATION_BEARING_FIELDS:
+            raise HTTPException(status_code=422, detail="unattributed_authorization_state")
         return False
     if not getattr(request.state, "service_authenticated", False):
         raise HTTPException(status_code=401, detail="gateway_credential_required")
@@ -224,7 +313,7 @@ def validate_gateway_envelope(payload: dict, supplied: set[str],
     if (not valid_identity(payload["user"]) or payload["user"] == "Guest"
             or not valid_identity(payload["site"])
             or payload["mode"] not in ("developer", "employee")
-            or payload["execution_scope"] != "chat-only"):
+            or payload["execution_scope"] != EXECUTION_SCOPE_AUTHENTICATED):
         raise HTTPException(status_code=422, detail="invalid_gateway_envelope")
     if not valid_identity(config.NEXMATE_FRAPPE_SITE):
         raise HTTPException(status_code=503, detail="invalid_frappe_site_config")
@@ -237,3 +326,12 @@ def validate_gateway_envelope(payload: dict, supplied: set[str],
     if "authorized_context" in supplied and payload.get("authorized_context") is not None:
         validate_authorized_context(payload["authorized_context"])
     return True
+
+
+#: Fields that assert Frappe-derived authorization state. Without a complete,
+#: service-authenticated gateway envelope none of them may be supplied: each
+#: is independently a way to assert authorization that was never derived from
+#: a Frappe session (task 5.3-5.5, design D10).
+AUTHORIZATION_BEARING_FIELDS = frozenset({
+    "authorized_context", "scope", "conversation",
+})

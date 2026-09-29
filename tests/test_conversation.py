@@ -58,7 +58,7 @@ class ExactFastPathTest(unittest.TestCase):
         with p1, p2, p3, p4:
             out = orchestrator.handle_question("help")
         self.assertEqual(out["route"], "capability")
-        for label in ("documentation", "Live ERPNext data lookups",
+        for label in ("documentation", "Authorized ERPNext records",
                       "source code"):
             self.assertIn(label, out["answer"])
 
@@ -116,7 +116,7 @@ class CapabilityTest(unittest.TestCase):
                                   side_effect=AssertionError("RAG ran")):
             out = orchestrator.handle_question("what can u do")
         self.assertEqual(out["route"], "capability")
-        for label in ("documentation", "Live ERPNext data lookups",
+        for label in ("documentation", "Authorized ERPNext records",
                       "source code"):
             self.assertIn(label, out["answer"])
 

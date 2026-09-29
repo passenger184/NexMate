@@ -37,7 +37,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Action",
-    "options": "proposal_created\napproved\nrejected\nexpired\nrecheck\nrecheck_denied\nexecution_attempt\nsucceeded\nfailed\ndenied\nuncertain\nreconciled\naudit_pending\nconflicting\ndebug_view\nsecurity_event\nai_request\nretrieval\ntool_call\ntool_denied\nerpnext_read",
+    "options": "proposal_created\napproved\nrejected\nexpired\nrecheck\nrecheck_denied\nexecution_attempt\nsucceeded\nfailed\ndenied\nuncertain\nreconciled\naudit_pending\nconflicting\ndebug_view\nsecurity_event\nai_request\nretrieval\ntool_call\ntool_denied\nerpnext_read\ndoctype_schema",
    "reqd": 1
   },
   {

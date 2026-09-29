@@ -36,16 +36,21 @@ import capabilities
 
 NO_ANSWER = "I don't have a confident answer for this in the knowledge base."
 
-CHAT_ONLY_CAPABILITIES = (
+#: Shown when the request reaches Desk through authenticated Frappe. Frappe is
+#: the authorization authority; this string advertises only chat operations and
+#: grants nothing.
+DESK_CHAT_CAPABILITIES = (
     "I can discuss ERPNext/Frappe and answer questions from the indexed "
-    "knowledge base with citations when available. Live data lookups, file "
-    "tools, edits, approvals and server session reset are unavailable in Desk chat."
+    "knowledge base with citations when available, look up authorized ERPNext "
+    "records, and inspect DocType schema when your account has Developer "
+    "access. File tools, edits, approvals and server session reset are "
+    "unavailable in Desk chat."
 )
 
-CHAT_ONLY_UNAVAILABLE = (
+DESK_CHAT_UNAVAILABLE = (
     "That operation is unavailable in Desk chat. I can answer questions "
-    "from indexed ERPNext/Frappe documentation, but cannot access live "
-    "records, search files, make edits or execute approvals."
+    "from indexed ERPNext/Frappe documentation and from authorized ERPNext "
+    "records, but cannot search files, make edits or execute approvals."
 )
 
 EMPLOYEE_OUT_OF_SCOPE = (
@@ -93,6 +98,17 @@ def _answer_listing(how: str) -> dict[str, Any]:
     }
 
 _ROUTES = ("erpnext", "code", "rag")
+
+# --- business-read request bounds ------------------------------------------------
+# The row count this service is willing to PROPOSE toward the Frappe control
+# plane. It mirrors the producer's approved immutable ceiling
+# (``erpnext_read.MAX_LIST_LIMIT``) and must never sit below it: a narrower
+# cap here would make an administrator's configured ``max_read_rows``
+# unreachable end to end. The default applies whenever a request names no
+# limit, and the effective (possibly narrower) limit is resolved by the Frappe
+# control plane from ``NexMate Settings`` — nothing here widens access.
+DEFAULT_READ_LIMIT = 20
+MAX_READ_LIMIT = 100
 
 # --- conversation hygiene --------------------------------------------------------
 # Greetings and topic changes must never inherit prior-turn context
@@ -316,7 +332,7 @@ _CONVERSATIONAL_FALLBACKS = {
 
 
 def _respond_conversational(subtype: str | None, question: str,
-                            allow_llm: bool = True, chat_only: bool = False) -> str:
+                            allow_llm: bool = True, gateway_attributed: bool = False) -> str:
     """Short natural reply; deterministic fallback if generation fails.
 
     Capability facts never come from here — capability answers render
@@ -324,8 +340,8 @@ def _respond_conversational(subtype: str | None, question: str,
     """
     fallback = _CONVERSATIONAL_FALLBACKS.get(
         subtype, _CONVERSATIONAL_FALLBACKS[None])
-    if chat_only and fallback == _SMALLTALK_REPLY:
-        fallback = "Hello! " + CHAT_ONLY_CAPABILITIES
+    if gateway_attributed and fallback == _SMALLTALK_REPLY:
+        fallback = "Hello! " + DESK_CHAT_CAPABILITIES
     if not allow_llm:
         return fallback
     try:
@@ -341,9 +357,9 @@ def _respond_conversational(subtype: str | None, question: str,
 
 def _conversational_result(subtype: str | None, question: str, how: str,
                            allow_llm: bool = True,
-                           chat_only: bool = False) -> dict[str, Any]:
+                           gateway_attributed: bool = False) -> dict[str, Any]:
     return {
-        "answer": _respond_conversational(subtype, question, allow_llm, chat_only),
+        "answer": _respond_conversational(subtype, question, allow_llm, gateway_attributed),
         "sources": [],
         "confidence": "high",
         "route": "smalltalk",
@@ -353,9 +369,9 @@ def _conversational_result(subtype: str | None, question: str, how: str,
 
 
 def _capability_result(mode: str, how: str,
-                       chat_only: bool = False) -> dict[str, Any]:
+                       gateway_attributed: bool = False) -> dict[str, Any]:
     return {
-        "answer": (CHAT_ONLY_CAPABILITIES if chat_only
+        "answer": (DESK_CHAT_CAPABILITIES if gateway_attributed
                    else capabilities.render_capability_answer(mode)),
         "sources": [],
         "confidence": "high",
@@ -366,12 +382,12 @@ def _capability_result(mode: str, how: str,
 
 
 def _clarify_result(topic: str | None, how: str,
-                    chat_only: bool = False) -> dict[str, Any]:
+                    gateway_attributed: bool = False) -> dict[str, Any]:
     return {
         "answer": (
             "Which ERPNext/Frappe concept or how-to would you like explained "
             "from indexed documentation? Please describe the workflow or screen."
-            if chat_only else capabilities.render_clarification(topic)
+            if gateway_attributed else capabilities.render_clarification(topic)
         ),
         "sources": [],
         "confidence": "low",
@@ -381,13 +397,13 @@ def _clarify_result(topic: str | None, how: str,
     }
 
 
-def _scope_result(how: str, chat_only: bool = False) -> dict[str, Any]:
+def _scope_result(how: str, gateway_attributed: bool = False) -> dict[str, Any]:
     return {
         "answer": (
             "That's outside Desk chat's scope. I can answer ERPNext/Frappe "
             "how-to and concept questions from indexed documentation. "
             "Try asking how to create a Sales Invoice."
-            if chat_only else capabilities.render_out_of_scope()
+            if gateway_attributed else capabilities.render_out_of_scope()
         ),
         "sources": [],
         "confidence": "low",
@@ -406,13 +422,13 @@ _TROUBLESHOOT_CLARIFY = (
 
 
 def _troubleshoot_clarify_result(how: str,
-                                 chat_only: bool = False) -> dict[str, Any]:
+                                 gateway_attributed: bool = False) -> dict[str, Any]:
     return {
         "answer": (
             "Which ERPNext/Frappe workflow or screen is giving you trouble, "
             "and what did you expect to happen? I can explain relevant "
             "guidance from indexed documentation."
-            if chat_only else _TROUBLESHOOT_CLARIFY
+            if gateway_attributed else _TROUBLESHOOT_CLARIFY
         ),
         "sources": [],
         "confidence": "low",
@@ -893,29 +909,32 @@ def run_erpnext_branch(question: str,
     execute, or consumes the authorized, minimized context Frappe produced. It
     never authorizes a read and holds no ERPNext credential for this purpose.
 
-    ``schema`` is deliberately outside the U5 business-read adapter (Decision
-    12) and remains a documented temporary consumer of the retained read
-    client, under the existing per-mode policy.
+    ``schema`` is likewise a REQUEST to the control plane, resolved by the
+    metadata module under the session user's capability and the site's
+    administrator metadata policy. It is a separate surface from the
+    business-record adapter and never passes through it.
     """
     request = preextracted or _extract_erpnext_request(question)
     op = request["op"]
     doctype = request["doctype"]
 
     if op == "schema":
-        # Temporary legacy consumer — see verification-notes.md. Removed from
-        # the user business-read path, but schema/metadata authorization is
-        # explicitly deferred by U5 and not yet redesigned.
-        payload = erpnext.get_doctype_schema(doctype)["data"]
+        # Inference REQUESTS metadata; it never retrieves or authorizes it.
+        #
+        # The answer leg of the round trip arrives here as authorized context
+        # that the Frappe control plane produced. That context cannot be
+        # forged from outside: a request without a complete valid gateway
+        # envelope is refused before an authorized-context field is ever
+        # consumed. So a schema-shaped authorized context on this branch is
+        # control-plane output and is answered from; anything else means no
+        # authorized result exists yet, and a request is emitted.
+        if not (isinstance(authorized_context, dict)
+                and authorized_context.get("operation") == "schema"):
+            return {"_read_request": {"kind": "schema", "doctype": doctype}}
         summary = {
-            "doctype": payload.get("doctype"),
-            "module": payload.get("module"),
-            "naming_rule": payload.get("naming_rule"),
-            "is_submittable": payload.get("is_submittable"),
-            "field_count": len(payload.get("fields", [])),
-            "fields": [
-                {k: f.get(k) for k in ("fieldname", "fieldtype", "label")}
-                for f in payload.get("fields", [])
-            ],
+            "doctype": authorized_context.get("doctype"),
+            "field_count": authorized_context.get("field_count"),
+            "fields": authorized_context.get("fields"),
         }
     elif authorized_context is not None:
         # Frappe already authorized, minimized and audited this. Consume only.
@@ -928,6 +947,12 @@ def run_erpnext_branch(question: str,
     else:
         # Ask the control plane. The request is untrusted and will be validated
         # and authorized in-process by the Frappe adapter.
+        #
+        # The cap here must never sit below the producer's approved immutable
+        # ceiling, or an administrator's configured read bound could never be
+        # reached end to end. The default (used when the request names no
+        # limit) stays at 20, and the effective, possibly narrower, limit is
+        # resolved by the Frappe control plane from ``NexMate Settings``.
         return {
             "_read_request": {
                 "operation": "document" if op == "document" else "list",
@@ -935,7 +960,8 @@ def run_erpnext_branch(question: str,
                 "name": request.get("name") or None,
                 "fields": _sanitize_requested_fields(request, op, doctype),
                 "filters": _sanitize_requested_filters(request, doctype),
-                "limit": min(int(request.get("limit") or 20), 20),
+                "limit": min(int(request.get("limit") or DEFAULT_READ_LIMIT),
+                             MAX_READ_LIMIT),
             }
         }
 
@@ -989,7 +1015,7 @@ def handle_question(
     history: list[dict[str, str]] | None = None,
     mode: str = "developer",
     *,
-    chat_only: bool = False,
+    gateway_attributed: bool = False,
     scope: dict[str, Any] | None = None,
     authorized_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1011,7 +1037,8 @@ def handle_question(
     the user.
     """
     tag: dict[str, Any] = {}
-    out = _handle_question_inner(question, conversation_id, history, mode, tag, chat_only,
+    out = _handle_question_inner(question, conversation_id, history, mode, tag,
+                                 gateway_attributed,
                                  scope=scope,
                                  authorized_context=authorized_context)
     out = dict(out)
@@ -1028,7 +1055,7 @@ def _handle_question_inner(
     history: list[dict[str, str]] | None,
     mode: str,
     tag: dict[str, Any],
-    chat_only: bool = False,
+    gateway_attributed: bool = False,
     scope: dict[str, Any] | None = None,
     authorized_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1045,10 +1072,10 @@ def _handle_question_inner(
         tag.update(nlu_kind=f"exact:{exact}", nlu_confidence=1.0,
                    nlu_topic=None)
     if exact == "capability":
-        return _capability_result(mode, "heuristic", chat_only)
+        return _capability_result(mode, "heuristic", gateway_attributed)
     if exact is not None:
         return _conversational_result(exact, question, "heuristic",
-                                      allow_llm=False, chat_only=chat_only)
+                                      allow_llm=False, gateway_attributed=gateway_attributed)
     if mode not in ("developer", "employee"):
         return {"answer": f"Unknown mode {mode!r}.", "sources": [],
                 "confidence": "low", "route": "smalltalk",
@@ -1067,7 +1094,7 @@ def _handle_question_inner(
         # clarification for an uncaught provider exception.
         degraded = _heuristic_route(question)
         if degraded in (None, "rag"):
-            return _clarify_result(None, "degraded", chat_only)
+            return _clarify_result(None, "degraded", gateway_attributed)
         route, how = degraded, "degraded"
     else:
         tag.update(nlu_kind=nlu["kind"],
@@ -1076,9 +1103,9 @@ def _handle_question_inner(
         kind = nlu["kind"]
         if kind == "conversational":
             return _conversational_result(
-                nlu.get("subtype"), question, "classifier", chat_only=chat_only)
+                nlu.get("subtype"), question, "classifier", gateway_attributed=gateway_attributed)
         if kind == "capability":
-            return _capability_result(mode, "classifier", chat_only)
+            return _capability_result(mode, "classifier", gateway_attributed)
         if kind == "clarify":
             if _is_complete_question(question):
                 # Complete interrogative misjudged by NLU: attempt normal
@@ -1093,16 +1120,16 @@ def _handle_question_inner(
                 condensed = generator.condense_followup(history, question)
                 if not condensed:
                     return _clarify_result(
-                        nlu.get("topic"), "classifier", chat_only)
+                        nlu.get("topic"), "classifier", gateway_attributed)
                 question = condensed
                 tag["refined_question"] = condensed
                 kind = "task"
                 nlu = dict(nlu, context_dependency="none")
             else:
                 return _clarify_result(
-                    nlu.get("topic"), "classifier", chat_only)
+                    nlu.get("topic"), "classifier", gateway_attributed)
         if kind == "out_of_scope":
-            return _scope_result("classifier", chat_only)
+            return _scope_result("classifier", gateway_attributed)
         if kind == "troubleshoot":
             # Troubleshooting reuses existing capabilities only: error
             # text goes down the code-explain path, anything vaguer gets
@@ -1110,10 +1137,10 @@ def _handle_question_inner(
             if explain.looks_like_error(question):
                 route, how = "code", "classifier"
             else:
-                return _troubleshoot_clarify_result("classifier", chat_only)
+                return _troubleshoot_clarify_result("classifier", gateway_attributed)
         else:  # task
             if nlu.get("confidence", 0.0) < config.NLU_MIN_CONFIDENCE:
-                return _clarify_result(nlu.get("topic"), "classifier", chat_only)
+                return _clarify_result(nlu.get("topic"), "classifier", gateway_attributed)
             if _is_bare_fragment(question):
                 # Insufficient input: a DocType/business noun alone is not
                 # evidence for any tool route. Clarify before condensation,
@@ -1121,7 +1148,7 @@ def _handle_question_inner(
                 # Non-task verdicts never reach here, so conversational,
                 # capability, and scope handling are unaffected.
                 return _clarify_result(nlu.get("topic") or question.strip(),
-                                       "classifier", chat_only)
+                                       "classifier", gateway_attributed)
             if (history and nlu.get("context_dependency") == "follows_topic"
                     and nlu.get("topic")):
                 # Elliptical continuation ("what about Purchase
@@ -1138,13 +1165,18 @@ def _handle_question_inner(
                     tag["refined_question"] = condensed
             route, how = decide_route(question, history)
 
-    if chat_only and route in ("code", "erpnext"):
+    # Route-level gate for operations that stay denied on the gateway path.
+    # `code` remains denied outright. `erpnext` is NOT denied here: authorized
+    # business reads and capability-gated metadata are authorized in the Frappe
+    # control plane, so the turn is allowed to reach the control plane and be
+    # refused or served there (design D3, D9).
+    if gateway_attributed and route == "code":
         return {
-            "answer": CHAT_ONLY_UNAVAILABLE,
+            "answer": DESK_CHAT_UNAVAILABLE,
             "sources": [],
             "confidence": "low",
             "route": route,
-            "route_how": how + "+chat-only-denied",
+            "route_how": how + "+desk-chat-denied",
         }
 
     if route == "code":
@@ -1189,25 +1221,15 @@ def _handle_question_inner(
 
     if route == "erpnext":
         try:
+            # Inference classifies and requests; it performs NO capability or
+            # policy decision. Employee schema requests are NOT declined here —
+            # they are emitted as a request and refused by the Frappe control
+            # plane, which is the only place that can authorize and audit the
+            # decision (design D8, task 9.1).
             request = _extract_erpnext_request(question)
-            if mode == "employee" and request.get("op") == "schema":
-                # Schema introspection is developer territory; employees
-                # get document/list lookups only.
-                out = {
-                    "answer": (
-                        "DocType schemas are a developer/administrator "
-                        "view and aren't available in employee mode. If "
-                        "you need a document or a list (for example your "
-                        "open orders), just ask for that instead."
-                    ),
-                    "sources": [], "confidence": "low",
-                    "route_meta": {"op": request.get("op"),
-                                   "doctype": request.get("doctype")},
-                }
-            else:
-                out = run_erpnext_branch(
-                    question, preextracted=request,
-                    authorized_context=authorized_context)
+            out = run_erpnext_branch(
+                question, preextracted=request,
+                authorized_context=authorized_context)
         except (erpnext.ErpnextUnavailable, erpnext.ErpnextApiError,
                 ValueError, json.JSONDecodeError) as exc:
             out = {
@@ -1250,7 +1272,7 @@ def _handle_question_inner(
     history = history or []
     answer = generator.generate_answer(
         question, chunks, history,
-        extra_system="" if chat_only else version_preamble(), persona=mode)
+        extra_system="" if gateway_attributed else version_preamble(), persona=mode)
     return {
         "answer": answer,
         "sources": [

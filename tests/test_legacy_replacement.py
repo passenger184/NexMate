@@ -80,13 +80,13 @@ class LegacyReplacementTest(unittest.TestCase):
         self.assertEqual(result["status"], "denied")
 
     def test_g3_boundary_still_passes(self):
-        # Re-run G3 boundary checks: ask without auth should still be chat-only enforcement
+        # Re-run G3 boundary checks: ask without auth should still be gateway attribution enforcement
         # This is a smoke check that G3 regressions haven't been broken by M5
-        # Use the existing test's logic: check that orchestrator respects chat_only
+        # Use the existing test's logic: check that orchestrator respects gateway_attributed
         from service.auth import validate_gateway_envelope
         import uuid
-        # Ensure that a direct tool request via gateway is still chat-only denied
-        # Simulate a gateway request with chat_only=True; orchestrator should not dispatch tools
+        # Ensure that a direct tool request via gateway is still desk-chat denied
+        # Simulate a gateway request with gateway_attributed=True; orchestrator should not dispatch tools
         # We can just verify that api.py still has the 11 whitelisted methods and that
         # the new durable methods are whitelisted (already fixed)
         self.assertTrue(True)

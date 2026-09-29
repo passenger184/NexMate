@@ -12,7 +12,7 @@ from tests.test_service_auth import KEY
 
 ENVELOPE = {
     "question": "help", "user": "synthetic-user", "site": "synthetic-site",
-    "mode": "employee", "execution_scope": "chat-only",
+    "mode": "employee", "execution_scope": "frappe-attributed",
 }
 CONVERSATION = {
     "id": "NM-00001", "owner": "synthetic-user", "site": "synthetic-site",
@@ -40,7 +40,7 @@ class ChatBoundaryTest(unittest.TestCase):
             (main.explain_tool, ("locate_and_explain",)),
             (main.edit_tool, ("propose_edit", "apply_edit")),
             (main.erpnext_write_tool, ("propose_write", "apply_write")),
-            (orchestrator, ("get_instance_versions", "_extract_erpnext_request", "run_erpnext_branch")),
+            (orchestrator, ("get_instance_versions",)),
         ):
             for name in names:
                 patched = self.stack.enter_context(mock.patch.object(
@@ -84,7 +84,7 @@ class ChatBoundaryTest(unittest.TestCase):
                              CONVERSATION["id"] if conversation else None)
             self.assertEqual(data["version_info"], orchestrator.unavailable_versions())
             self.assertEqual(data["route"], "capability")
-            self.assertEqual(data["answer"], orchestrator.CHAT_ONLY_CAPABILITIES)
+            self.assertEqual(data["answer"], orchestrator.DESK_CHAT_CAPABILITIES)
             if conversation is not None:
                 self.assertEqual(data["turn_count"], 2)  # one prior pair + this turn
             else:
@@ -214,32 +214,52 @@ class ChatBoundaryTest(unittest.TestCase):
             self.assertEqual(self.post().status_code, 200)
 
     def test_forced_routes_in_both_personas(self) -> None:
-        for mode, route, question in itertools.product(
-                ("developer", "employee"), ("code", "erpnext"),
-                ("List all invoices", "What files are in this project?",
-                 "Read this file", "Approve the edit", "Reset my session")):
+        # `code` stays denied pre-entry in both personas: file search, edit,
+        # approval and reset never reach the control plane.
+        for mode, question in itertools.product(
+                ("developer", "employee"),
+                ("What files are in this project?", "Read this file",
+                 "Approve the edit", "Reset my session")):
             with mock.patch.object(orchestrator, "_understand_with_llm", return_value=NLU_TASK), \
-                    mock.patch.object(orchestrator, "decide_route", return_value=(route, "classifier")):
+                    mock.patch.object(orchestrator, "decide_route", return_value=("code", "classifier")):
                 response = self.post(dict(ENVELOPE, question=question, mode=mode))
             self.assertEqual(response.status_code, 200, response.text)
             data = response.json()
-            self.assertEqual(data["answer"], orchestrator.CHAT_ONLY_UNAVAILABLE)
-            self.assertEqual(data["route_how"], "classifier+chat-only-denied")
+            self.assertEqual(data["answer"], orchestrator.DESK_CHAT_UNAVAILABLE)
+            self.assertEqual(data["route_how"], "classifier+desk-chat-denied")
             self.assertEqual(data["confidence"], "low")
             self.assertEqual(data["sources"], [])
+        self.retrieve.assert_not_called()
+        self.generate.assert_not_called()
+
+    def test_forced_erpnext_route_reaches_the_control_plane(self) -> None:
+        # The `erpnext` route is NOT denied pre-entry any more: authorized
+        # business reads and capability-gated metadata are authorized by the
+        # Frappe control plane, so the turn must reach it. Inference only
+        # REQUESTS; no ERPNext client is called (design D3, D9).
+        for mode in ("developer", "employee"):
+            with mock.patch.object(orchestrator, "_understand_with_llm", return_value=NLU_TASK), \
+                    mock.patch.object(orchestrator, "decide_route", return_value=("erpnext", "classifier")), \
+                    mock.patch.object(orchestrator, "_extract_erpnext_request",
+                                      return_value={"op": "list", "doctype": "Customer"}):
+                response = self.post(dict(ENVELOPE, question="List all invoices", mode=mode))
+            self.assertEqual(response.status_code, 200, response.text)
+            # A read REQUEST, not an answer: Frappe performs the authorized read.
+            self.assertEqual(response.json(), {"read_request": {
+                "operation": "list", "doctype": "Customer", "name": None,
+                "fields": ["name"], "filters": {}, "limit": 20}})
         self.retrieve.assert_not_called()
         self.generate.assert_not_called()
 
     def test_troubleshooting_and_degraded_routes_are_denied(self) -> None:
         for mode in ("employee", "developer"):
             cases = ((dict(NLU_TASK, kind="troubleshoot"), "Traceback: ValueError: failure"),
-                     (None, "How many invoices are in our erpnext instance?"),
                      (None, "Where is it implemented in this project?"))
             for nlu, question in cases:
                 with mock.patch.object(orchestrator, "_understand_with_llm", return_value=nlu):
                     response = self.post(dict(ENVELOPE, question=question, mode=mode))
                 self.assertEqual(response.status_code, 200, response.text)
-                self.assertTrue(response.json()["route_how"].endswith("+chat-only-denied"))
+                self.assertTrue(response.json()["route_how"].endswith("+desk-chat-denied"))
         self.retrieve.assert_not_called()
 
     def test_followup_rewrites_cannot_change_scope(self) -> None:
@@ -249,12 +269,12 @@ class ChatBoundaryTest(unittest.TestCase):
                                    turns=[{"role": "user",
                                            "content": "Prior synthetic question"}]))
         with mock.patch.object(orchestrator, "_understand_with_llm", return_value=dict(
-                NLU_TASK, context_dependency="follows_topic", topic="code", chat_only=False,
+                NLU_TASK, context_dependency="follows_topic", topic="code", gateway_attributed=False,
                 execution_scope="tools")), \
                 mock.patch.object(orchestrator, "decide_route", return_value=("code", "classifier")):
             response = self.post(history_payload)
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["route_how"].endswith("+chat-only-denied"))
+        self.assertTrue(response.json()["route_how"].endswith("+desk-chat-denied"))
         self.assertGreaterEqual(self.condense.call_count, 2)
         self.retrieve.assert_not_called()
 
@@ -335,7 +355,7 @@ class ChatBoundaryTest(unittest.TestCase):
             response = self.post(dict(ENVELOPE, scope=scope))
             self.assertEqual(response.status_code, 200, response.text)
             handle.assert_called_once_with(
-                "help", None, [], mode="employee", chat_only=True, scope=scope,
+                "help", None, [], mode="employee", gateway_attributed=True, scope=scope,
                 authorized_context=None)
             self.assertEqual(response.json()["route"], "capability")
 
@@ -381,10 +401,10 @@ class ChatBoundaryTest(unittest.TestCase):
                 mock.patch.object(orchestrator, "get_instance_versions", return_value={"status": "legacy"}) as versions:
             response = self.post({"question": "help", "mode": "developer"})
             self.assertEqual(response.status_code, 200)
-            handle.assert_called_once_with("help", None, [], mode="developer", chat_only=False,
+            handle.assert_called_once_with("help", None, [], mode="developer", gateway_attributed=False,
                                                scope=None, authorized_context=None)
             versions.assert_called_once_with()
-        self.assertIn("Live ERPNext data lookups", response.json()["answer"])
+        self.assertIn("Authorized ERPNext records", response.json()["answer"])
 
     def test_legacy_direct_tool_retained_behind_gate(self) -> None:
         with mock.patch.object(main.search_tool, "search_project", return_value={
@@ -398,12 +418,16 @@ class ChatBoundaryTest(unittest.TestCase):
             search.assert_called_once_with("synthetic", False)
 
     def test_route_inventory_and_outer_cors_gate(self) -> None:
+        # The three legacy ERPNext read routes were REMOVED by
+        # retire-chat-only-developer-capability-model and are absent from the
+        # inventory. Every other previously existing route remains.
         expected = {"/ask", "/orchestrate", "/health",
                     "/tools/read_file", "/tools/search", "/tools/explain",
-                    "/tools/propose_edit", "/tools/apply_edit", "/tools/erpnext/schema",
-                    "/tools/erpnext/document", "/tools/erpnext/list",
+                    "/tools/propose_edit", "/tools/apply_edit",
                     "/tools/erpnext_write/propose", "/tools/erpnext_write/apply",
                     "/ui", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+        for retired in main.RETIRED_ERPNEXT_READ_ROUTES:
+            self.assertNotIn(retired, expected, retired)
         self.assertEqual({route.path for route in main.app.routes}, expected)
         for path, method in itertools.product(expected - {"/health"} | {"/unknown", "/health/"},
                                               ("GET", "POST", "OPTIONS")):

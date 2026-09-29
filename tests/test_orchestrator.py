@@ -5,6 +5,7 @@ Run: .venv/bin/python -m unittest discover -s tests -v
 LLM calls are mocked; the live instance is never touched here.
 """
 
+import json
 import unittest
 from unittest import mock
 
@@ -109,41 +110,64 @@ class ErpnextBranchTest(unittest.TestCase):
             with self.assertRaises(Exception):
                 orchestrator._extract_erpnext_request("junk")
 
-    def test_run_branch_builds_payload_and_cites(self) -> None:
+    def test_run_branch_requests_schema_and_cites_minimized_context(self) -> None:
+        """With no authorized context, a schema turn is a control-plane REQUEST."""
+        with mock.patch.object(orchestrator.generator, "_complete",
+                               return_value='{"op": "schema", "doctype": "Customer"}'), \
+                mock.patch.object(orchestrator.erpnext, "get_doctype_schema",
+                                  side_effect=AssertionError("client called")):
+            result = orchestrator.run_erpnext_branch(
+                "What fields does Customer have?")
+        self.assertEqual(result["_read_request"],
+                         {"kind": "schema", "doctype": "Customer"})
+
+    def test_run_branch_answers_schema_from_authorized_context_only(self) -> None:
+        """Given Frappe-produced authorized context, answer from it and cite."""
         captured = {}
 
         def fake_complete(messages, **kwargs):
             captured.setdefault("count", 0)
             captured["count"] += 1
             if captured["count"] == 1:  # extraction call
-                return ('{"op": "schema", "doctype": "Customer"}')
-            return f"The payload lists `fieldname` values [1]."
+                return '{"op": "schema", "doctype": "Customer"}'
+            return "The payload lists `fieldname` values [1]."
 
+        authorized = {
+            "doctype": "Customer", "operation": "schema", "field_count": 1,
+            "fields": [{"fieldname": "customer_name", "fieldtype": "Data",
+                        "label": "Name", "reqd": True, "read_only": False}],
+        }
         with mock.patch.object(orchestrator.generator, "_complete",
                                side_effect=fake_complete), \
-                mock.patch.object(
-                    orchestrator.erpnext, "get_doctype_schema",
-                    return_value={"data": {
-                        "doctype": "Customer", "module": "Selling",
-                        "naming_rule": "By Naming Series field",
-                        "is_submittable": 0,
-                        "fields": [
-                            {"fieldname": "customer_name",
-                             "fieldtype": "Data", "label": "Name"}]}}), \
+                mock.patch.object(orchestrator.erpnext, "get_doctype_schema",
+                                  side_effect=AssertionError("client called")), \
                 mock.patch.object(orchestrator, "get_instance_versions",
                                   return_value={
                                       "frappe": "16.31.0",
                                       "erpnext": "16.32.3",
                                       "status": "live"}):
             result = orchestrator.run_erpnext_branch(
-                "What fields does Customer have?")
+                "What fields does Customer have?",
+                authorized_context=authorized)
 
+        self.assertNotIn("_read_request", result)
         self.assertEqual(result["route_meta"]["op"], "schema")
         self.assertEqual(len(result["sources"]), 1)
-        self.assertIn("live ERPNext: Customer",
-                      result["sources"][0]["title"])
+        self.assertIn("live ERPNext: Customer", result["sources"][0]["title"])
         # first LLM call = extraction; second = grounded answer over payload
         self.assertGreaterEqual(captured["count"], 2)
+
+    def test_run_branch_ignores_non_metadata_context_on_the_schema_branch(self) -> None:
+        """A business-read context is never consumed as a metadata answer."""
+        with mock.patch.object(orchestrator.generator, "_complete",
+                               return_value='{"op": "schema", "doctype": "Customer"}'):
+            result = orchestrator.run_erpnext_branch(
+                "What fields does Customer have?",
+                authorized_context={"doctype": "Customer", "operation": "list",
+                                    "fields_returned": ["name"], "row_count": 0,
+                                    "data": []})
+        self.assertEqual(result["_read_request"],
+                         {"kind": "schema", "doctype": "Customer"})
 
 
 class HandleQuestionRouting(unittest.TestCase):
@@ -348,31 +372,66 @@ class ExtractionNameValidationTest(unittest.TestCase):
 
 
 class UnknownDoctypeTest(unittest.TestCase):
-    """U5: the ERPNext business-read path no longer calls the read client.
+    """The ERPNext read and metadata paths never call the shared-credential client.
 
-    The shared-credential 404 path below is retained ONLY for the `schema`
-    operation, which Decision 12 keeps on the legacy client until native
-    metadata authorization is designed separately. A business-data read of an
-    unapproved DocType is now refused by the Frappe adapter, and under the
-    anti-oracle requirement a not-found and a permission-denied collapse to one
-    indistinguishable denial that must NOT name the DocType.
+    Both a business-data read and a schema request are REQUESTS to the Frappe
+    control plane. A business-data read of an unapproved DocType is refused by
+    the Frappe adapter, and under the anti-oracle requirement a not-found and a
+    permission-denied collapse to one indistinguishable denial that must NOT
+    name the DocType. The same applies to metadata: a nonexistent DocType
+    collapses into one denial that reveals nothing about which DocTypes exist.
     """
     TASK_NLU = {"kind": "task", "subtype": None, "topic": "invoices",
                 "context_dependency": "none", "confidence": 0.9}
-    FRAPPE_404 = ('["{\\"message\\":\\"DocType Invoices not found\\",'
-                  '\\"raise_exception\\":1}]')
 
-    def _run_schema(self, exc):
+    def _run_schema(self, doctype="Invoices"):
         with mock.patch.object(orchestrator, "_understand_with_llm",
-                                return_value=dict(self.TASK_NLU)), \
+                               return_value=dict(self.TASK_NLU)), \
                 mock.patch.object(orchestrator, "decide_route",
-                                   return_value=("erpnext", "classifier")), \
+                                  return_value=("erpnext", "classifier")), \
                 mock.patch.object(
                     orchestrator, "_extract_erpnext_request",
-                    return_value={"op": "schema", "doctype": "Invoices"}), \
-                mock.patch.object(orchestrator.erpnext, "get_doctype_schema",
-                                  side_effect=exc):
+                    return_value={"op": "schema", "doctype": doctype}):
             return orchestrator.handle_question("show invoices for review")
+
+    def _run_read(self, limit=None, op="list", doctype="Invoices"):
+        request = {"op": op, "doctype": doctype}
+        if limit is not None:
+            request["limit"] = limit
+        with mock.patch.object(orchestrator, "_understand_with_llm",
+                               return_value=dict(self.TASK_NLU)), \
+                mock.patch.object(orchestrator, "decide_route",
+                                  return_value=("erpnext", "classifier")), \
+                mock.patch.object(orchestrator, "_extract_erpnext_request",
+                                  return_value=request):
+            return orchestrator.handle_question("show invoices for review")
+
+    def test_proposed_read_limit_is_not_narrower_than_the_producer_ceiling(self):
+        """A cap below the approved ceiling makes it unreachable end to end.
+
+        This service only *proposes* a limit; the Frappe control plane still
+        resolves the effective one from ``NexMate Settings``. But a proposal
+        cap sitting below the producer's immutable ceiling would mean an
+        administrator's configured ``max_read_rows`` could never be exercised.
+        """
+        from frappe_app.erpnext_ai_copilot import erpnext_read as er
+        self.assertEqual(orchestrator.DEFAULT_READ_LIMIT, 20)
+        self.assertEqual(orchestrator.MAX_READ_LIMIT, er.MAX_LIST_LIMIT)
+        self.assertEqual(orchestrator.MAX_READ_LIMIT, 100)
+        # No limit named -> the default, unchanged from before.
+        self.assertEqual(self._run_read()["_read_request"]["limit"], 20)
+        # A proposed limit inside the ceiling is passed through verbatim.
+        for proposed in (1, 20, 21, 50, 75, 100):
+            with self.subTest(proposed=proposed):
+                self.assertEqual(
+                    self._run_read(limit=proposed)["_read_request"]["limit"],
+                    proposed)
+        # Above the ceiling is clamped to it, never above.
+        for proposed in (101, 1000):
+            with self.subTest(proposed=proposed):
+                self.assertEqual(
+                    self._run_read(limit=proposed)["_read_request"]["limit"],
+                    100)
 
     def test_business_read_of_unapproved_doctype_is_a_read_request(self) -> None:
         """A plural DocType guess now produces a read request the adapter refuses."""
@@ -394,25 +453,32 @@ class UnknownDoctypeTest(unittest.TestCase):
         self.assertNotIn("Invoices", collapsed["answer"])
         self.assertEqual(collapsed["answer"], "Document not found or access denied.")
 
-    def test_schema_404_names_the_bad_name(self) -> None:
-        out = self._run_schema(orchestrator.erpnext.ErpnextApiError(
-            404, self.FRAPPE_404))
+    def test_schema_is_a_control_plane_request_not_a_client_call(self) -> None:
+        """Inference REQUESTS metadata; it never retrieves or authorizes it."""
+        out = self._run_schema()
+        self.assertEqual(out["_read_request"],
+                         {"kind": "schema", "doctype": "Invoices"})
         self.assertEqual(out["route"], "erpnext")
-        self.assertEqual(out["confidence"], "low")
-        self.assertEqual(out["fallback"], "lookup-failure")
-        self.assertIn("'Invoices'", out["answer"])
-        self.assertNotIn("ERPNext returned 404", out["answer"])
+        self.assertEqual(out["route_how"], "classifier+read-requested")
 
-    def test_schema_other_failures_keep_generic_wording(self) -> None:
-        out = self._run_schema(orchestrator.erpnext.ErpnextUnavailable(
-            "connection refused"))
-        self.assertIn("Could not complete the live-instance lookup", out["answer"])
-        self.assertEqual(out["fallback"], "lookup-failure")
+    def test_schema_never_names_the_doctype_to_the_caller(self) -> None:
+        """A nonexistent DocType collapses into one indistinguishable denial."""
+        from frappe_app.erpnext_ai_copilot import doctype_meta as dm
+        collapsed = dm.collapse_for_caller(dm.DocTypeNotFound("no such doctype"))
+        self.assertNotIn("Invoices", collapsed["answer"])
+        self.assertEqual(collapsed["answer"], "Schema not found or access denied.")
+        self.assertEqual(collapsed["route_how"], "frappe-schema+denied")
+        # The internal reason is never part of the caller-visible object.
+        self.assertNotIn("not_found", json.dumps(collapsed))
 
-    def test_schema_non_doctype_404_keeps_generic_wording(self) -> None:
-        out = self._run_schema(orchestrator.erpnext.ErpnextApiError(
-            404, "missing document body"))
-        self.assertIn("Could not complete the live-instance lookup", out["answer"])
+    def test_schema_inference_makes_no_erpnext_call(self) -> None:
+        with mock.patch.object(orchestrator.erpnext, "get_doctype_schema",
+                               side_effect=AssertionError("client called")), \
+                mock.patch.object(orchestrator.erpnext, "get_document",
+                                  side_effect=AssertionError("client called")), \
+                mock.patch.object(orchestrator.erpnext, "list_documents",
+                                  side_effect=AssertionError("client called")):
+            self._run_schema()
 class NluTelemetryTest(unittest.TestCase):
     def test_every_result_carries_its_nlu_verdict(self) -> None:
         # Fast-path: deterministic marker, no model verdict.

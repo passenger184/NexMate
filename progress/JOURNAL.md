@@ -1112,3 +1112,41 @@ artifact touched; no archive, commit or push.
   anchor caveat was added to that table; the endpoint *names* were re-verified.
 - Anchors introduced or repointed in this pass were each verified against source
   before use; all 15 resolve to the claimed code.
+
+## 2026-09-29 — Retire `chat-only`, capability model, configurable metadata policy — implemented, migrated, live-verified (control plane)
+
+OpenSpec change `retire-chat-only-developer-capability-model`, 161 tasks.
+Offline: 568 Python tests OK (1 skipped), `openspec validate --strict` valid
+for the change, all changes and all specs, `git diff --check` clean.
+
+Migration (approved subject to the backup gate): backup at
+`/tmp/opencode/nexmate-migrate-20260929T090136Z/` with SHA256SUMS (six DocType
+JSONs, four `tabDocType` rows, full data dumps: 15 audit rows, 0/0/0
+elsewhere). Preflight clean on both `sites/apps.txt` and
+`frontend installed_apps` — the previously recorded inconsistency was already
+resolved before this run. `bench --site frontend migrate` exit 0, no NexMate
+orphan deletion; all six DocTypes resolve, action vocabulary 21+1
+(`doctype_schema` appended last), outcomes unchanged at 11.
+
+Live control-plane verification on `frontend`: absent policy denies for a
+developer-capable Administrator; `all` serves Customer with exactly the five
+projected attributes (87 fields); three employee users denied with identical
+collapse; child-table, Single and nonexistent DocTypes denied indistinguishably;
+allowlist permits only listed DocTypes; committed policy changes take effect on
+the next request; exactly one `doctype_schema` event per resolution; policy
+changes emit `security_event` audit events with exact previous/new mode plus
+Frappe `Version` rows; no ERPNext credential on the Frappe-attributed paths;
+U5 business-read matrix unchanged (allowed/denied per Frappe, identical
+collapse).
+
+Two defects found and fixed by live verification, both in new code only
+(`erpnext_read.py` and `audit.py` untouched): (1) the child-table Link field
+was first named `doctype`, which shadows `Document.doctype` — renamed to
+`target_doctype` with a second migration on the empty table; (2) parent save
+does not invoke child-row `validate()`, so the structural exclusions moved to
+the parent's `validate()` as well. Settings-change audit previously read the
+latest `Version` row (off by one); it now uses `get_doc_before_save()`.
+
+Open product decision, recorded not changed: the 100-field projection bound
+refuses Item (132), Sales Order (170) and Sales Invoice (233) live. The
+implementation follows the spec; whether to raise the bound is a product call.

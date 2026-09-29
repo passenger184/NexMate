@@ -48,6 +48,10 @@ actual `.env` was not read; no credentials were used or changed.
 | `nexmate_developer_roles` | `[]`; a JSON list of explicit role names. Only a matching actual user role selects developer persona. Malformed mappings log a safe code and use employee. No implicit Administrator/System Manager elevation. |
 | `nexmate_inference_timeout` | `300` seconds; finite JSON number strictly greater than 0 and at most 900. Strings, booleans and null are invalid. |
 
+| Desk-editable NexMate administrator surface | Default and behavior |
+|---|---|
+| `NexMate Settings` → `metadata_access_mode` | No permissive default: an absent, unset, invalid or unreadable policy **denies** metadata access. `all` permits any eligible existing DocType; `allowlist` permits only the DocTypes in `NexMate Metadata DocType Rule`. Development/testing posture is `all`; an administrator may choose `allowlist` for production. `all` exposes structural information from custom applications and is not automatically appropriate for production. Only System Manager may change it; Developer capability confers no configuration authority. Read uncached per decision; committed changes take effect on the next request. |
+
 The gateway uses a 5-second HTTP connect timeout and the configured read
 timeout. The read timeout limits waiting for response data, not total
 request duration. It supplies neither cancellation nor retry semantics;
@@ -78,7 +82,7 @@ Rotate both server settings during a controlled maintenance window and
 reload the affected processes/configuration. There is one accepted key, no
 secondary-key or unauthenticated fallback: a mismatch refuses service calls
 and the gateway returns a sanitized failure. Review rollback by retaining
-inference authentication and backend chat-only enforcement, or disabling
+inference authentication and operation-specific backend enforcement gates, or disabling
 Desk chat. Never restore an unauthenticated inference deployment, send the
 key to a browser or enable production development bypass. Source review and
 synthetic mismatch/failure tests are not a performed deployment rollback.
@@ -115,14 +119,17 @@ other prefix matches are not exempt.
 Desk uses only authenticated Frappe `erpnext_ai_copilot.api.ask`, relying on
 standard non-guest authentication and session CSRF checks. The server
 constructs user/site/mode, the retrieval authorization scope, and exact
-`execution_scope="chat-only"`; inference requires service authentication
+`execution_scope="frappe-attributed"`; inference requires service authentication
 and validates the complete envelope and fixed site before history/routing/
 retrieval. Partial or invalid envelopes cannot downgrade to legacy mode,
 even under development exemption.
 
-Backend request-local `chat_only` enforcement denies code and ERPNext
-handlers before entry in both personas, including natural-language,
-troubleshooting, rewritten follow-ups and degraded routing. Incidental
+Backend request-local enforcement denies the `code` route pre-entry in both
+personas and routes `erpnext` turns to the Frappe control plane for
+authorization, including natural-language,
+troubleshooting, rewritten follow-ups and degraded routing. A request without
+a complete valid envelope is refused if it carries an authorized-context
+field, an authorization scope, or a conversation block. Incidental
 ERPNext version lookups are suppressed; versions report unavailable.
 Existing conversational/cited cached RAG continues, not live file tools.
 Retrieval is authorization-scoped (site/visibility/roles pre-filtered

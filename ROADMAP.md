@@ -81,8 +81,8 @@ answer with a `[1]` citation. One GET, no writes, no code changes, no cloud.
 This closes one M7 evidence gap and is recorded in `progress/CURRENT.md`.
 
 It is **not** a Developer Mode delivery: the run exercised the inference-side
-developer path with `chat_only` at its default `False`, while the Desk gateway
-hard-codes `"execution_scope": "chat-only"`. Desk-facing Developer Mode,
+developer path, while the Desk gateway
+carried `"execution_scope": "chat-only"`. Desk-facing Developer Mode,
 permission parity with the incoming Desk identity (**U5**) and the normal
 integration user's `Customer` schema access (403) all remain unproven.
 
@@ -101,6 +101,26 @@ Knowledge-corpus retrieval ACL coarse tiers, multi-site tenancy (U1), DocType
 schema/metadata authorization, and the shared credential retained for the
 version lookup and legacy writes all remain open. `schema` reads stay on the
 retained legacy client under the existing per-mode policy.
+
+## Retire `chat-only`, Developer capability, configurable metadata policy — DELIVERED 2026-09-29
+
+The fixed `chat-only` scope is replaced by a generic authenticated scope that
+grants nothing; capability is derived live from Frappe roles and carried in the
+existing `mode` field. DocType metadata is served in-process by Frappe under
+capability plus the administrator-controlled `NexMate Settings` policy
+(`all | allowlist`, fail-closed, uncached), with a five-field projection, a
+dedicated `doctype_schema` audit action, and a metadata-specific collapse. The
+three legacy `/tools/erpnext/*` routes are removed; no-envelope requests cannot
+assert `authorized_context`, `scope`, or `conversation`. The `code` route stays
+denied pre-entry. Three additive DocType synchronizations, no data migration;
+`audit.py` unchanged; `erpnext_read.py` changed only in three operational
+bound constants, aligned to the approved service ceilings. Migration ran
+2026-09-29 on
+`frontend` with a verified backup; live evidence is in the change's
+`verification-notes.md`. The metadata field bound is a configurable
+administrator value: default 300 fields, immutable service ceiling 500,
+immutable byte ceiling 131072. At the default every DocType observed live
+on the test site is served, the widest being Sales Invoice at 233 fields.
 
 **Evidence.** Implemented and verified: 457 Python tests OK (1 skipped)
 and the Node harness passing, including a dedicated adapter suite and a
@@ -188,7 +208,7 @@ corpus inventory. Original requirements remain in the historical phase specs.
 The user approved implementing `authenticated-frappe-control-plane` after
 its plans are internally consistent and strictly validated; this update is
 planning only, not implementation or complete M2/G2 acceptance. Its scope
-is authenticated chat-only transport with deterministic backend tool denial,
+is authenticated transport with deterministic backend operation denial,
 not owned sessions, ACL retrieval or production readiness. DECISIONS.md's
 appended clarification records the four resolved choices and approval.
 

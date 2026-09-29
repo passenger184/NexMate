@@ -180,23 +180,6 @@ class EditApplyResponse(BaseModel):
     memory: dict = {}
 
 
-class ErpnextSchemaRequest(BaseModel):
-    doctype: str = Field(min_length=1, max_length=140)
-
-
-class ErpnextDocumentRequest(BaseModel):
-    doctype: str = Field(min_length=1, max_length=140)
-    name: str = Field(min_length=1, max_length=140)
-
-
-class ErpnextListRequest(BaseModel):
-    doctype: str = Field(min_length=1, max_length=140)
-    filters: dict | None = None
-    fields: list[str] | None = None
-    limit: int = Field(config.ERPNEXT_DEFAULT_LIST_LIMIT, ge=1, le=100)
-    order_by: str | None = Field(None, max_length=140)
-
-
 class OrchestrateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -601,63 +584,19 @@ def _erpnext_http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=str(exc))
 
 
-#: U5 deprecation marker for the legacy ERPNext read routes. These routes are
-#: RETAINED (not removed) but are no longer the path for authenticated user
-#: business reads, which now go through the Frappe-native authorization
-#: boundary. They remain service-authenticated and confer NO end-user
-#: authorization: reaching one proves only service access, never a user's
-#: ERPNext permission. Removal is follow-on work gated on dependency proof.
-DEPRECATED_ERPNEXT_READ_ROUTES = ("/tools/erpnext/schema", "/tools/erpnext/document", "/tools/erpnext/list")
-DEPRECATION_NOTICE = (
-    "Deprecated: authenticated ERPNext business reads are authorized by the "
-    "Frappe control plane, not by this endpoint. Service access here is not "
-    "end-user ERPNext authorization."
-)
-
-
-@app.post("/tools/erpnext/schema", deprecated=True)
-def tools_erpnext_schema(req: ErpnextSchemaRequest) -> dict:
-    """DEPRECATED (U5). Phase 5 read-only tool: live DocType schema.
-
-    Not the authenticated user business-read path. Retained behind the service
-    gate; carries no end-user ERPNext authorization.
-    """
-    try:
-        return erpnext_tool.get_doctype_schema(req.doctype)
-    except (erpnext_tool.ErpnextUnavailable,
-            erpnext_tool.ErpnextApiError) as exc:
-        raise _erpnext_http_error(exc) from exc
-
-
-@app.post("/tools/erpnext/document", deprecated=True)
-def tools_erpnext_document(req: ErpnextDocumentRequest) -> dict:
-    """DEPRECATED (U5). One live document by exact name.
-
-    Not the authenticated user business-read path. Retained behind the service
-    gate; carries no end-user ERPNext authorization.
-    """
-    try:
-        return erpnext_tool.get_document(req.doctype, req.name)
-    except (erpnext_tool.ErpnextUnavailable,
-            erpnext_tool.ErpnextApiError) as exc:
-        raise _erpnext_http_error(exc) from exc
-
-
-@app.post("/tools/erpnext/list", deprecated=True)
-def tools_erpnext_list(req: ErpnextListRequest) -> dict:
-    """DEPRECATED (U5). Filtered document list (light fields).
-
-    Not the authenticated user business-read path. Retained behind the service
-    gate; carries no end-user ERPNext authorization.
-    """
-    try:
-        return erpnext_tool.list_documents(
-            req.doctype, filters=req.filters, fields=req.fields,
-            limit=req.limit, order_by=req.order_by,
-        )
-    except (erpnext_tool.ErpnextUnavailable,
-            erpnext_tool.ErpnextApiError) as exc:
-        raise _erpnext_http_error(exc) from exc
+#: The three legacy ERPNext read routes were REMOVED by
+#: `retire-chat-only-developer-capability-model`. They returned the shared
+#: account's data — including a complete DocType document with its
+#: `permissions` child table — to any service-credential holder with no user
+#: attribution. Their replacements are the Frappe-native authorization boundary
+#: for business reads and the control-plane capability and policy gate for
+#: metadata. Requests to these paths are refused as unknown operations.
+#:
+#: The shared-credential read client is retained for the enumerated remaining
+#: consumers only (write propose validation, write propose/apply, version
+#: lookup) and is no longer reachable from any Frappe-attributed business-user
+#: path.
+RETIRED_ERPNEXT_READ_ROUTES = ("/tools/erpnext/schema", "/tools/erpnext/document", "/tools/erpnext/list")
 
 
 @app.post("/orchestrate", response_model=OrchestrateResponse)
@@ -669,7 +608,10 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
     inference persists nothing per-conversation (ownership-stateless).
     Routing happens on the CONDENSED question when history is present.
     """
-    chat_only = validate_gateway_envelope(req.model_dump(), req.model_fields_set, request)
+    # Retired with the `chat-only` scope. The value now means only "a
+    # credentialed, Frappe-attributed request may reach orchestration" and
+    # gates no operation; each operation has its own enforcement point.
+    is_attributed = validate_gateway_envelope(req.model_dump(), req.model_fields_set, request)
     import json as _json
     request_id = uuid.uuid4().hex[:12]
     t0 = time.perf_counter()
@@ -691,7 +633,7 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
 
     result = orchestrator.handle_question(
         search_question, conversation_id, history, mode=req.mode,
-        chat_only=chat_only, scope=req.scope,
+        gateway_attributed=is_attributed, scope=req.scope,
         authorized_context=req.authorized_context)
 
     # Exchanges so far (prior pairs) plus this one; None when stateless.
@@ -766,7 +708,7 @@ def orchestrate(req: OrchestrateRequest, request: Request) -> OrchestrateRespons
         route=result["route"],
         route_how=result["route_how"],
         mode=req.mode,
-        version_info=(orchestrator.unavailable_versions() if chat_only
+        version_info=(orchestrator.unavailable_versions() if is_attributed
                       else orchestrator.get_instance_versions()),
         conversation_id=conversation_id,
         turn_count=turn_count,

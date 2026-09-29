@@ -87,13 +87,27 @@ class FrappeGatewayTest(unittest.TestCase):
         self.frappe.get_doc = mock.Mock(side_effect=GatewayNotFound("no doc"))
         self.frappe.delete_doc = mock.Mock()
         self.frappe.db = mock.Mock()
+        # Model genuine Settings absence: tabSingles proves the record was
+        # never saved, so role resolution falls back to site_config. (A bare
+        # Mock's truthy return would model "proven saved", which routes to
+        # fail-closed instead; tests for that state override sql explicitly.)
+        self.frappe.db.sql = mock.Mock(return_value=[])
         self.conversations = self.load_module("conversations")
         # U5: the gateway imports the Frappe-native read adapter alongside
         # conversations. Load the real module so the read seam is exercised.
         self.erpnext_read = self.load_module("erpnext_read")
+        # Metadata: a separate control-plane surface from the business read,
+        # loaded here so the gateway's kind dispatch is exercised offline.
+        self.doctype_meta = self.load_module("doctype_meta")
+        # Limits: the single source of truth for administrator settings and
+        # immutable ceilings. Loaded real (it is dependency-free offline) so
+        # capability derivation and bound resolution behave as in production.
+        self.policy_limits = self.load_module("policy_limits")
         package = types.ModuleType("erpnext_ai_copilot")
         package.conversations = self.conversations
         package.erpnext_read = self.erpnext_read
+        package.doctype_meta = self.doctype_meta
+        package.policy_limits = self.policy_limits
         self.audit = self.load_module("audit")
         self.audit.record_audit = mock.Mock(return_value={"name": "NMAU-1"})
         self.modules_patch = mock.patch.dict(
@@ -101,6 +115,8 @@ class FrappeGatewayTest(unittest.TestCase):
                           "erpnext_ai_copilot": package,
                           "erpnext_ai_copilot.conversations": self.conversations,
                           "erpnext_ai_copilot.erpnext_read": self.erpnext_read,
+                          "erpnext_ai_copilot.doctype_meta": self.doctype_meta,
+                          "erpnext_ai_copilot.policy_limits": self.policy_limits,
                           "frappe_app.erpnext_ai_copilot.audit": self.audit})
         self.modules_patch.start()
         self.addCleanup(self.modules_patch.stop)
@@ -170,7 +186,7 @@ class FrappeGatewayTest(unittest.TestCase):
             "http://inference.invalid:8000/orchestrate",
             json={"question": "help",
                   "user": "synthetic-user", "site": "synthetic-site",
-                  "mode": "employee", "execution_scope": "chat-only",
+                  "mode": "employee", "execution_scope": "frappe-attributed",
                   "scope": {"site": "synthetic-site", "tiers": ["public"],
                             "roles": [], "derived_by": "frappe-gateway"}},
             headers={"X-NexMate-Key": KEY}, timeout=(5, 300),
@@ -202,18 +218,21 @@ class FrappeGatewayTest(unittest.TestCase):
             self.frappe.session.user = user
             self.api.ask("help")
             self.assertEqual(self.client.post.call_args.kwargs["json"]["mode"], "employee")
+        # Exactly one live role read per request: an empty mapping is decided
+        # without consulting roles, so no lookup is performed at all.
         self.frappe.get_roles.assert_not_called()
 
     def test_explicit_matching_role_selects_developer_only(self) -> None:
         self.frappe.conf["nexmate_developer_roles"] = ["Engineer"]
         self.body["mode"] = "developer"
         self.api.ask("help")
-        # Persona derivation and scope derivation each read actual roles.
+        # Capability derivation and authorization-scope construction share ONE
+        # live role read per request (task 4.5).
         self.assertEqual(self.frappe.get_roles.call_args_list,
-                         [mock.call("synthetic-user")] * 2)
+                         [mock.call("synthetic-user")])
         payload = self.client.post.call_args.kwargs["json"]
         self.assertEqual(payload["mode"], "developer")
-        self.assertEqual(payload["execution_scope"], "chat-only")
+        self.assertEqual(payload["execution_scope"], "frappe-attributed")
         self.frappe.conf["nexmate_developer_roles"] = ["Other Role"]
         self.body["mode"] = "employee"
         self.api.ask("help")
@@ -257,14 +276,18 @@ class FrappeGatewayTest(unittest.TestCase):
             self.frappe.form_dict = {
                 "cmd": "erpnext_ai_copilot.api.ask", "question": "help", "mode": mode,
             }
-            self.dispatch_form()
-            self.assertEqual(self.client.post.call_args.kwargs["json"], {
-                "question": "help", "user": "synthetic-user",
-                "site": "synthetic-site", "mode": "employee", "execution_scope": "chat-only",
-                "scope": {"site": "synthetic-site", "tiers": ["public"],
-                          "roles": [], "derived_by": "frappe-gateway"},
-            })
-        self.warnings.assert_not_called()
+            # A browser-supplied mode is REFUSED as an unsupported field, not
+            # accepted and silently ignored (task 10.4).
+            with self.assertRaisesRegex(GatewayError, "^unsupported_gateway_fields$"):
+                self.dispatch_form()
+        self.session.assert_not_called()
+        self.client.post.assert_not_called()
+        self.warnings.assert_called_with("unsupported_gateway_fields")
+
+    def test_browser_mode_is_not_an_allowed_form_field(self) -> None:
+        self.assertNotIn("mode", self.api.ALLOWED_FORM_FIELDS)
+        self.assertEqual(list(inspect.signature(self.api.ask).parameters),
+                         ["question", "conversation_id"])
 
     def test_scope_field_cannot_be_supplied_by_browser(self) -> None:
         for scope in (None, "", "developer", {"site": "synthetic-site"}, [], {}):
@@ -675,7 +698,8 @@ class AuthorizedReadSeamTest(FrappeGatewayTest):
                                              "row_count": 0, "data": []}):
             with self.assertRaises(GatewayError):
                 self.api.ask("how many customers?")
-        self.assertLessEqual(self.client.post.call_count, self.api.MAX_READ_ROUNDS)
+        self.assertLessEqual(self.client.post.call_count,
+                               self.policy_limits.DEFAULT_READ_ROUNDS)
 
     def test_10_14_user_read_path_reaches_no_legacy_endpoint(self):
         src = open(self.api.__file__, encoding="utf-8").read()

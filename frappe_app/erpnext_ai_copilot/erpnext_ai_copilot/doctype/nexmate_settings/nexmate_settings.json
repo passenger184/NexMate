@@ -1,0 +1,166 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-09-29 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_developer_schema",
+  "metadata_access_mode",
+  "max_schema_fields",
+  "max_schema_bytes",
+  "developer_role_rules",
+  "section_live_data_bounds",
+  "max_read_rows",
+  "max_read_fields",
+  "max_read_bytes",
+  "section_execution",
+  "max_read_rounds",
+  "section_metadata_rules",
+  "column_break_policy",
+  "metadata_doctype_rules"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_developer_schema",
+   "fieldtype": "Section Break",
+   "label": "Developer & Schema Settings"
+  },
+  {
+   "default": "",
+   "description": "Developer metadata access policy.\n\nall: any eligible existing DocType on this site.\nallowlist: only the DocTypes listed below.\n\nAny unset, invalid or unreadable value denies metadata access. There is no permissive default.",
+   "fieldname": "metadata_access_mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Metadata Access Mode",
+   "options": "\nall\nallowlist",
+   "reqd": 0
+  },
+  {
+   "default": "300",
+   "description": "Maximum metadata fields returned for a permitted DocType. Supported range 1 to 500; the immutable service ceiling of 500 fields always applies at runtime.",
+   "fieldname": "max_schema_fields",
+   "fieldtype": "Int",
+   "in_list_view": 0,
+   "label": "Max Schema Fields",
+   "reqd": 0
+  },
+  {
+   "default": "65536",
+   "description": "Maximum serialized metadata payload size in bytes. Supported range 4096 to 131072 bytes; the immutable service ceiling of 131072 bytes always applies at runtime. May be shown in KB on Desk; enforcement is byte-based.",
+   "fieldname": "max_schema_bytes",
+   "fieldtype": "Int",
+   "in_list_view": 0,
+   "label": "Max Schema Payload Size (bytes)",
+   "reqd": 0
+  },
+  {
+   "description": "Frappe Roles that confer the NexMate Developer capability. When one or more roles are listed here, this list takes precedence over the site-configuration developer roles. When this list is empty on a saved record, no Developer roles are granted. When NexMate Settings has never been saved, the site-configuration value applies.",
+   "fieldname": "developer_role_rules",
+   "fieldtype": "Table",
+   "label": "Developer Roles",
+   "options": "NexMate Developer Role Rule",
+   "reqd": 0
+  },
+  {
+   "fieldname": "section_live_data_bounds",
+   "fieldtype": "Section Break",
+   "label": "Live Data Query Bounds"
+  },
+  {
+   "default": "20",
+   "description": "Maximum business-record rows returned for a read request. Supported range 1 to 100; the immutable service ceiling of 100 rows always applies at runtime. Narrows only: Frappe authorization and field allowlists are unaffected.",
+   "fieldname": "max_read_rows",
+   "fieldtype": "Int",
+   "in_list_view": 0,
+   "label": "Max Records per Query",
+   "reqd": 0
+  },
+  {
+   "default": "20",
+   "description": "Maximum business-record fields returned for a read request. Supported range 1 to 50; the immutable service ceiling of 50 fields always applies at runtime.",
+   "fieldname": "max_read_fields",
+   "fieldtype": "Int",
+   "in_list_view": 0,
+   "label": "Max Fields per Query",
+   "reqd": 0
+  },
+  {
+   "default": "65536",
+   "description": "Maximum business-record read payload size in bytes. Supported range 4096 to 131072 bytes; the immutable service ceiling of 131072 bytes always applies at runtime. May be shown in KB on Desk; enforcement is byte-based.",
+   "fieldname": "max_read_bytes",
+   "fieldtype": "Int",
+   "in_list_view": 0,
+   "label": "Max Read Payload Size (bytes)",
+   "reqd": 0
+  },
+  {
+   "fieldname": "section_execution",
+   "fieldtype": "Section Break",
+   "label": "Execution Settings"
+  },
+  {
+   "default": "3",
+   "description": "Maximum inference-to-Frappe read rounds for a single ask. Supported range 1 to 5; the immutable service ceiling of 5 rounds always applies at runtime.",
+   "fieldname": "max_read_rounds",
+   "fieldtype": "Int",
+   "in_list_view": 0,
+   "label": "Max Read Rounds",
+   "reqd": 0
+  },
+  {
+   "fieldname": "section_metadata_rules",
+   "fieldtype": "Section Break",
+   "label": "Metadata Access Rules"
+  },
+  {
+   "fieldname": "column_break_policy",
+   "fieldtype": "Column Break",
+   "label": "Policy"
+  },
+  {
+   "description": "DocTypes a Developer-capability user may inspect when the mode is allowlist. Child tables and Single DocTypes are never accepted here and cannot be inspected regardless of mode.",
+   "fieldname": "metadata_doctype_rules",
+   "fieldtype": "Table",
+   "label": "Permitted DocTypes",
+   "options": "NexMate Metadata DocType Rule",
+   "reqd": 0
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "istable": 0,
+ "links": [
+  {
+   "link_doctype": "NexMate Metadata DocType Rule",
+   "link_fieldname": "target_doctype"
+  },
+  {
+   "link_doctype": "NexMate Developer Role Rule",
+   "link_fieldname": "target_role"
+  }
+ ],
+ "modified": "2026-09-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Erpnext AI Copilot",
+ "name": "NexMate Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

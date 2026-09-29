@@ -25,7 +25,12 @@ os.environ.setdefault("NEXMATE_FRAPPE_SITE", "u5_site")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import service.main as main  # noqa: E402
-from service.auth import validate_authorized_context  # noqa: E402
+from service.auth import (  # noqa: E402
+    MAX_AUTHORIZED_CONTEXT_BYTES,
+    MAX_AUTHORIZED_CONTEXT_FIELDS,
+    MAX_AUTHORIZED_CONTEXT_ROWS,
+    validate_authorized_context,
+)
 from fastapi import HTTPException  # noqa: E402
 
 
@@ -57,10 +62,65 @@ class AuthorizedContextValidation(unittest.TestCase):
                     validate_authorized_context(bad)
 
     def test_7_2_operation_must_be_supported(self):
-        for op in ("schema", "write", "delete", "update", "", None, 7):
+        """Metadata is now an accepted operation; write-shaped ones are not.
+
+        Rewritten by retire-chat-only-developer-capability-model. The consumer
+        contract gained a separate metadata shape with its own declared bounds,
+        dispatched here so every business-read bound is untouched. Business-read
+        operations remain exactly (document, list), and metadata has its own
+        frozen shape.
+        """
+        from service.auth import (AUTHORIZED_CONTEXT_OPERATIONS as READ_OPS,
+                                  METADATA_FIELDS_CEILING, METADATA_CONTEXT_KEYS,
+                                  METADATA_OPERATION, validate_metadata_context)
+
+        # Business-read operations are unchanged.
+        self.assertEqual(READ_OPS, ("document", "list"))
+
+        # Business-read operations are unchanged.
+        self.assertEqual(READ_OPS, ("document", "list"))
+        for op in ("write", "delete", "update", "", None, 7):
             with self.subTest(op=op):
                 with self.assertRaises(HTTPException):
                     validate_authorized_context(ctx(operation=op, data={}))
+
+        # A metadata operation is accepted, but only with its own shape.
+        meta = {
+            "doctype": "Customer", "operation": METADATA_OPERATION, "field_count": 1,
+            "fields": [{"fieldname": "customer_name", "fieldtype": "Data",
+                        "label": "Name", "reqd": True, "read_only": False}],
+        }
+        self.assertEqual(validate_authorized_context(meta), meta)
+        self.assertEqual(validate_metadata_context(meta), meta)
+
+        # Metadata cannot borrow the business-read shape.
+        with self.assertRaises(HTTPException):
+            validate_authorized_context(dict(meta, extra="x"))
+        for bad in (
+            dict(meta, field_count=METADATA_FIELDS_CEILING + 1),
+            dict(meta, field_count=99),
+            dict(meta, fields=[]),
+            dict(meta, fields=[{"fieldname": "x"}]),
+            dict(meta, fields=[dict(meta["fields"][0], options="A\nB\nC")]),
+            dict(meta, fields=[dict(meta["fields"][0], permlevel=1)]),
+        ):
+            with self.subTest(bad=sorted(bad)):
+                with self.assertRaises(HTTPException):
+                    validate_authorized_context(bad)
+
+        self.assertEqual(len(METADATA_CONTEXT_KEYS), 4)
+
+    def test_business_read_bounds_are_not_weakened_by_metadata(self) -> None:
+        """Adding the metadata contract must not relax any business-read bound."""
+        for bad in (ctx(fields_returned=[f"f{i}" for i in range(50)]),
+                    ctx(fields_returned=[]),
+                    ctx(row_count=10_000),
+                    ctx(row_count=-1),
+                    ctx(doctype=""),
+                    ctx(doctype="x" * 141)):
+            with self.subTest(bad=str(bad)[:60]):
+                with self.assertRaises(HTTPException):
+                    validate_authorized_context(bad)
 
     def test_7_2_field_count_and_types_bounded(self):
         with self.assertRaises(HTTPException):
@@ -87,10 +147,34 @@ class AuthorizedContextValidation(unittest.TestCase):
                     data={"name": "a", "customer_name": "leak"}))
 
     def test_7_2_list_row_count_bounded(self):
+        # The consumer bound is the producer's approved immutable ceiling
+        # (100 rows). A consumer narrower than its producer would silently
+        # discard a Frappe-authorized read, so 100 is admitted and 101 is not.
+        self.assertEqual(MAX_AUTHORIZED_CONTEXT_ROWS, 100)
+        admitted = ctx(data=[{"name": str(i)} for i in range(MAX_AUTHORIZED_CONTEXT_ROWS)])
+        self.assertEqual(validate_authorized_context(admitted), admitted)
         with self.assertRaises(HTTPException):
-            validate_authorized_context(ctx(data=[{"name": str(i)} for i in range(100)]))
+            validate_authorized_context(
+                ctx(row_count=MAX_AUTHORIZED_CONTEXT_ROWS + 1,
+                    data=[{"name": str(i)} for i in range(MAX_AUTHORIZED_CONTEXT_ROWS + 1)]))
+        with self.assertRaises(HTTPException):
+            validate_authorized_context(ctx(row_count=10_000))
+
+    def test_7_2_fields_returned_bounded_by_named_ceiling(self):
+        self.assertEqual(MAX_AUTHORIZED_CONTEXT_FIELDS, 50)
+        for n in (1, 20, 49, MAX_AUTHORIZED_CONTEXT_FIELDS):
+            with self.subTest(fields=n):
+                fields = [f"f{i}" for i in range(n)]
+                ok = ctx(fields_returned=fields, data=[{} for _ in range(1)])
+                validate_authorized_context(ok)
+        for n in (MAX_AUTHORIZED_CONTEXT_FIELDS + 1, 60):
+            with self.subTest(fields=n):
+                with self.assertRaises(HTTPException):
+                    validate_authorized_context(
+                        ctx(fields_returned=[f"f{i}" for i in range(n)]))
 
     def test_7_2_oversized_payload_refused(self):
+        self.assertEqual(MAX_AUTHORIZED_CONTEXT_BYTES, 131072)
         big = ctx(data=[{"name": str(i), "customer_name": "x" * 8000} for i in range(20)])
         with self.assertRaises(HTTPException):
             validate_authorized_context(big)
@@ -227,20 +311,39 @@ class OrchestratorCutover(unittest.TestCase):
 
 class LegacyEndpointQuarantine(unittest.TestCase):
     def test_12_1_routes_retained_in_inventory(self):
+        """Post-change: the three legacy ERPNext read routes are ABSENT.
+
+        Rewritten by retire-chat-only-developer-capability-model. They returned
+        the shared account's data, including a complete DocType document with
+        its `permissions` child table, to any service-credential holder with no
+        user attribution. Their replacements are the Frappe-native authorization
+        boundary for business reads and the control-plane capability and policy
+        gate for metadata.
+        """
         paths = {r.path for r in main.app.routes if hasattr(r, "path")}
-        for route in ("/tools/erpnext/schema", "/tools/erpnext/document", "/tools/erpnext/list"):
-            self.assertIn(route, paths, route)
+        for route in main.RETIRED_ERPNEXT_READ_ROUTES:
+            self.assertNotIn(route, paths, route)
 
     def test_12_1_routes_marked_deprecated(self):
+        """Post-change: no route remains marked deprecated.
+
+        The only three deprecated routes were the legacy ERPNext read routes;
+        with them removed there is nothing left to deprecate.
+        """
         deprecated = {r.path for r in main.app.routes
                       if getattr(r, "deprecated", False)}
-        self.assertEqual(
-            deprecated,
-            {"/tools/erpnext/schema", "/tools/erpnext/document", "/tools/erpnext/list"})
+        self.assertEqual(deprecated, set())
 
     def test_12_3_read_client_retained_for_legacy_consumers(self):
+        """The client is retained only for the enumerated remaining consumers.
+
+        After removal of the legacy routes the remaining inference-side
+        consumers are write propose validation, write propose/apply, and the
+        version lookup. `get_document` and `list_documents` had no consumer
+        outside the retired routes and are no longer required.
+        """
         from tools import erpnext
-        for name in ("get_doctype_schema", "get_document", "list_documents", "call_method"):
+        for name in ("get_doctype_schema", "call_method"):
             self.assertTrue(hasattr(erpnext, name), name)
 
     def test_12_4_version_lookup_still_resolves_credential(self):
@@ -263,8 +366,14 @@ class LegacyEndpointQuarantine(unittest.TestCase):
             self.assertEqual(erpnext_write._base_url(), "http://x")
 
     def test_12_2_deprecation_policy_is_stated(self):
-        self.assertEqual(len(main.DEPRECATED_ERPNEXT_READ_ROUTES), 3)
-        self.assertIn("not end-user ERPNext authorization", main.DEPRECATION_NOTICE)
+        """Post-change: the deprecation markers are replaced by retirement markers.
+
+        Nothing is deprecated any more, so there is no deprecation notice. The
+        retired-route tuple records what was removed and why.
+        """
+        self.assertEqual(len(main.RETIRED_ERPNEXT_READ_ROUTES), 3)
+        self.assertFalse(hasattr(main, "DEPRECATED_ERPNEXT_READ_ROUTES"))
+        self.assertFalse(hasattr(main, "DEPRECATION_NOTICE"))
 
 
 if __name__ == "__main__":

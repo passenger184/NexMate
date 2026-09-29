@@ -136,6 +136,41 @@ cloud consent, and M7's release **NOT READY**, production-write
 **DENIED/PENDING** and cloud/private-data consent **NO GRANT** decisions are
 unchanged.
 
+## Delivered change: configurable Developer metadata policy (2026-09-29)
+
+Developer DocType metadata is served in-process by Frappe (`frappe.get_meta()`)
+under the live session user's capability first, then DocType existence, then the
+immutable `istable`/`issingle` exclusions, then the site's
+administrator-controlled metadata access policy (`NexMate Settings`,
+`all | allowlist`). Only System Manager may change the policy; Developer
+capability confers no configuration authority. An absent, unset, invalid,
+unreadable, or empty-allowlist policy **denies** rather than permits — it never
+defaults to the permissive mode. The projection is exactly `fieldname`,
+`fieldtype`, `label`, `reqd`, `read_only`, bounded and refused rather than
+truncated, with one metadata-only `doctype_schema` audit event per resolution
+that fails closed when the audit write is not confirmed durable.
+
+The three legacy `/tools/erpnext/*` routes are removed, and a request without a
+complete valid gateway envelope is refused if it carries an authorized-context
+field, an authorization scope, or a conversation block. The shared credential is
+now retained only for the write path and the version lookup; no shared ERPNext
+credential is used on the Frappe-attributed business-read or metadata path.
+
+**Limits stated plainly.** `all` policy mode exposes structural information from
+every eligible DocType, including custom applications installed on the site; it
+is a development/testing posture and is not automatically appropriate for
+production. The metadata field bound is administrator-configurable and is
+bounded by a **default of 300 fields**, an **immutable service ceiling of
+500 fields** and an **immutable byte ceiling of 131072**; the effective
+bound is `min(administrator value, immutable ceiling)`, so an
+administrator can narrow operational volume but never raise it past the
+ceiling. At the default every DocType observed live on the test site is
+served, the widest being Sales Invoice at 233 fields, and the ceiling
+admits a larger custom schema with no code change. The pre-existing business-read
+audit path does not inspect a returned pending audit result; only the new
+metadata path fails closed on it. None of this grants production-write approval
+or cloud consent.
+
 ## Local-default data and all-call egress policy
 
 Company documents, source code, configuration, resolved issues and live ERP

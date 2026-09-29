@@ -64,22 +64,29 @@ class EmployeeModeTest(unittest.TestCase):
                 "why does f raise?", mode="developer")
         self.assertEqual(out["confidence"], "high")
 
-    def test_schema_lookup_denied_for_employees(self) -> None:
+    def test_schema_request_is_issued_for_employees_not_declined(self) -> None:
+        """Inference makes NO capability decision for metadata.
+
+        The employee schema short-circuit is removed: inference classifies and
+        REQUESTS, and the Frappe control plane authorizes or refuses under the
+        live session user's capability and the site's metadata policy. Declining
+        here would make the policy unbindable and unauditable.
+        """
         with mock.patch.object(orchestrator, "_understand_with_llm",
                                return_value=dict(_TASK_NLU)), \
             mock.patch.object(orchestrator, "decide_route",
-                               return_value=("erpnext", "heuristic")), \
+                              return_value=("erpnext", "heuristic")), \
                 mock.patch.object(
                     orchestrator, "_extract_erpnext_request",
-                    return_value={"op": "schema", "doctype": "Customer"}), \
-                mock.patch.object(orchestrator, "run_erpnext_branch") as run:
+                    return_value={"op": "schema", "doctype": "Customer"}):
             out = orchestrator.handle_question(
                 "What fields does Customer have?", mode="employee")
-        run.assert_not_called()
-        self.assertEqual(out["confidence"], "low")
-        self.assertIn("aren't available in employee mode", out["answer"])
-        # the extraction still happened exactly once (no double call)
+        self.assertEqual(out["_read_request"],
+                         {"kind": "schema", "doctype": "Customer"})
         self.assertEqual(out["route"], "erpnext")
+        self.assertEqual(out["route_how"], "heuristic+read-requested")
+        # A request, not a conversational decline: there is no answer at all.
+        self.assertNotIn("answer", out)
 
     def test_document_list_allowed_for_employees(self) -> None:
         """U5: employees may read business data, via the Frappe-authorized path.
