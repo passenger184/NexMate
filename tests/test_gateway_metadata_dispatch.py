@@ -886,5 +886,146 @@ class GatewayDispatchTest(_Shared):
         self.assertNotIn("fields", out)
 
 
+class MetadataNullContractTest(_Shared):
+    """Producer guarantees a total projection; the consumer stays strict.
+
+    Both modules under test are the real ones: `doctype_meta` produces the
+    projection and `service/auth.py` validates it. This is the cross-layer
+    contract from design D22.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.dm = _M["doctype_meta"]
+        self.auth = _M["auth"]
+        self.erpnext_read = _M["erpnext_read"]
+
+    def _field(self, name, fieldtype="Data", label=None, reqd=0, read_only=0,
+               options="Secret,Business,Vocabulary"):
+        return types.SimpleNamespace(fieldname=name, fieldtype=fieldtype,
+                                     label=label, reqd=reqd, read_only=read_only,
+                                     options=options, permlevel=0)
+
+    def _projection(self, *fields, doctype="Customer"):
+        meta = types.SimpleNamespace(name=doctype, istable=False, issingle=False,
+                                      fields=list(fields))
+        return self.dm.project_meta(meta, max_fields=500)
+
+    def _context(self, projection):
+        return {"doctype": projection["doctype"], "operation": "schema",
+                "field_count": len(projection["fields"]),
+                "fields": projection["fields"]}
+
+    # --- producer: the projection is total --------------------------------
+
+    def test_layout_and_unlabelled_fields_yield_a_total_projection(self):
+        projection = self._projection(
+            self._field("basic_info", "Section Break", label=None),
+            self._field("column_break_xyz", "Column Break", label=None),
+            self._field("html_block", "HTML", label=None),
+            self._field("description", "Small Text", label=None, reqd=None),
+        )
+        for entry in projection["fields"]:
+            self.assertEqual(sorted(entry),
+                             ["fieldname", "fieldtype", "label", "read_only", "reqd"])
+            for key, value in entry.items():
+                self.assertIsNotNone(value, key)
+        self.assertEqual(projection["fields"][0]["label"], "")
+        self.assertEqual(projection["fields"][3]["reqd"], False)
+
+    # --- the real consumer now admits it ----------------------------------
+
+    def test_producer_output_is_accepted_by_the_real_consumer(self):
+        projection = self._projection(
+            self._field("section", "Section Break", label=None),
+            self._field("col", "Column Break", label=None, reqd=1, read_only=0),
+        )
+        ctx = self._context(projection)
+        self.assertEqual(self.auth.validate_metadata_context(ctx), ctx)
+        # ... and through the same dispatch a real payload takes.
+        self.assertEqual(self.auth.validate_authorized_context(ctx), ctx)
+
+    def test_projection_remains_exactly_five_keys_per_field(self):
+        projection = self._projection(
+            self._field("a", "Section Break", label=None),
+            self._field("b", "Data", label="B"))
+        for entry in projection["fields"]:
+            self.assertEqual(set(entry), set(self.dm.PROJECTION_FIELDS))
+            self.assertEqual(len(entry), 5)
+
+    # --- the consumer remains strict ---------------------------------------
+
+    def test_consumer_still_rejects_a_deliberately_null_label(self):
+        """Producer-side normalisation must not weaken the validator."""
+        ctx = {"doctype": "Customer", "operation": "schema", "field_count": 1,
+               "fields": [{"fieldname": "a", "fieldtype": "Section Break",
+                           "label": None, "reqd": False, "read_only": False}]}
+        with self.assertRaises(self.auth.HTTPException):
+            self.auth.validate_metadata_context(ctx)
+        with self.assertRaises(self.auth.HTTPException):
+            self.auth.validate_authorized_context(ctx)
+
+    def test_consumer_still_rejects_a_missing_declared_attribute(self):
+        ctx = {"doctype": "Customer", "operation": "schema", "field_count": 1,
+               "fields": [{"fieldname": "a", "fieldtype": "Data", "label": "A",
+                           "reqd": False}]}
+        with self.assertRaises(self.auth.HTTPException):
+            self.auth.validate_metadata_context(ctx)
+
+    def test_consumer_still_rejects_an_extra_attribute(self):
+        ctx = {"doctype": "Customer", "operation": "schema", "field_count": 1,
+               "fields": [{"fieldname": "a", "fieldtype": "Data", "label": "A",
+                           "reqd": False, "read_only": False,
+                           "default": "Business Value"}]}
+        with self.assertRaises(self.auth.HTTPException):
+            self.auth.validate_metadata_context(ctx)
+
+    def test_consumer_value_type_rule_is_present_and_unchanged(self):
+        """Pins the strictness this change deliberately does not relax."""
+        import inspect
+        source = inspect.getsource(self.auth.validate_metadata_context)
+        self.assertIn("isinstance(entry.get(k), (str, bool, int))", source)
+        self.assertIn("invalid_authorized_context", source)
+
+    # --- anti-exfiltration preserved by the producer -----------------------
+
+    def test_projection_carries_no_business_values_or_permissions(self):
+        projection = self._projection(
+            self._field("customer_name", "Data", label="Customer Name",
+                        reqd=1, options="Tier A,Tier B"))
+        serialized = jsonlib.dumps(projection, default=str)
+        self.assertNotIn("options", serialized)
+        self.assertNotIn("Secret", serialized)
+        self.assertNotIn("permlevel", serialized)
+        self.assertNotIn("permissions", serialized)
+        for entry in projection["fields"]:
+            self.assertEqual(set(entry), set(self.dm.PROJECTION_FIELDS))
+
+    def test_producer_introduces_no_shared_erpnext_credential(self):
+        import inspect
+        source = inspect.getsource(self.dm)
+        for token in ("ERPNEXT_API_KEY", "ERPNEXT_API_SECRET", "api_secret",
+                      "urlopen", "requests.", "httpx"):
+            self.assertNotIn(token, source, token)
+
+    def test_metadata_path_makes_no_business_read_calls(self):
+        calls = []
+        real = self.erpnext_read.attempt_read
+        self.erpnext_read.attempt_read = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+        try:
+            self._projection(self._field("a", "Section Break", label=None))
+        finally:
+            self.erpnext_read.attempt_read = real
+        self.assertEqual(calls, [])
+
+    # --- bounds and ceilings untouched -------------------------------------
+
+    def test_metadata_ceilings_are_unchanged_by_this_contract(self):
+        self.assertEqual(self.auth.METADATA_FIELDS_CEILING, 500)
+        self.assertEqual(self.auth.METADATA_BYTES_CEILING, 131072)
+        self.assertEqual(sorted(self.auth.METADATA_PROJECTION_KEYS),
+                         ["fieldname", "fieldtype", "label", "read_only", "reqd"])
+
+
 if __name__ == "__main__":
     unittest.main()

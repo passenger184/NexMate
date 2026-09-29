@@ -53,6 +53,12 @@ SUPPORTED_MODES = (MODE_ALL, MODE_ALLOWLIST)
 #: any other DocType document attribute.
 PROJECTION_FIELDS = ("fieldname", "fieldtype", "label", "reqd", "read_only")
 
+#: Which of :data:`PROJECTION_FIELDS` are booleans. The remainder are strings.
+#: Both halves of the projection are total: no attribute is ever emitted as
+#: ``None`` (design D22), so the inference validator's strict scalar assertion
+#: can never reject a Frappe-authorized projection.
+PROJECTION_FLAG_FIELDS = frozenset({"reqd", "read_only"})
+
 #: Bounds are administrator-configured within immutable ceilings; see
 #: :mod:`policy_limits`. There are no fixed numeric bounds in this module:
 #: every bound below resolves per decision from `NexMate Settings`.
@@ -286,6 +292,15 @@ def project_meta(meta: object, max_fields=None) -> dict:
 	``options`` is deliberately absent: Select and Link field options are where
 	a DocType document carries business vocabulary.
 
+	The projection is **total**: every projected attribute is a concrete
+	scalar, never ``None`` (design D22). Frappe stores a field's ``label`` as
+	NULL when it was saved without one, which is normal for every Section
+	Break, Column Break and HTML field, and also occurs on ordinary data
+	fields, so a null label is normalized to the empty string here rather than
+	being emitted and then refused by the strict inference validator. A value
+	that is already a string or a boolean crosses unchanged; nothing else is
+	coerced.
+
 	``max_fields`` is the resolved effective field bound; when omitted it is
 	resolved here from ``NexMate Settings`` within the immutable ceiling.
 	"""
@@ -296,17 +311,19 @@ def project_meta(meta: object, max_fields=None) -> dict:
 	for field in rows:
 		entry = {}
 		for key in PROJECTION_FIELDS:
-			if key == "fieldname":
-				value = getattr(field, "fieldname", None)
-			else:
-				value = getattr(field, key, None)
-			# Normalize only the flag types, never any business value.
-			if key in ("reqd", "read_only") and isinstance(value, int):
-				value = bool(value)
-			elif value is None and key in ("reqd", "read_only"):
-				value = False
-			elif value is not None and key not in ("reqd", "read_only"):
-				value = str(value)
+			value = getattr(field, key, None)
+			if key in PROJECTION_FLAG_FIELDS:
+				# The declared flag attributes are boolean. Frappe stores
+				# them as 0/1 ints, and the column is nullable.
+				if isinstance(value, int):
+					value = bool(value)
+				elif value is None:
+					value = False
+			elif value is None:
+				# A nullable string attribute, never a business value: the
+				# projection carries structure only, so the empty string is
+				# an exact stand-in for "no label was set".
+				value = ""
 			entry[key] = value
 		fields.append(entry)
 

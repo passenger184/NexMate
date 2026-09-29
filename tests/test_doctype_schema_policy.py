@@ -423,6 +423,138 @@ class ProjectionTest(MetadataTestBase):
         self.assertEqual(self.policy_limits.DEFAULT_SCHEMA_BYTES, 65536)
 
 
+class _NullableField:
+    """A DocField double that can genuinely hold ``None``.
+
+    The shared ``_Field`` used by the other suites defaults ``label`` to the
+    fieldname, so it can never represent an unlabelled field. Frappe leaves
+    ``label`` NULL for every Section Break, Column Break and HTML field, and
+    for some ordinary data fields, so the contract has to be exercised against
+    a real ``None`` rather than a stand-in.
+    """
+
+    def __init__(self, fieldname, fieldtype="Data", label=None,
+                 reqd=0, read_only=0, options=None, permlevel=0):
+        self.fieldname = fieldname
+        self.fieldtype = fieldtype
+        self.label = label
+        self.reqd = reqd
+        self.read_only = read_only
+        self.options = options
+        self.permlevel = permlevel
+
+
+class ProjectionValueContractTest(MetadataTestBase):
+    """The projection is total: no attribute is ever ``None`` (design D22)."""
+
+    STRING_KEYS = ("fieldname", "fieldtype", "label")
+    FLAG_KEYS = ("reqd", "read_only")
+
+    def _project(self, *fields):
+        self.add_meta("Customer", fields=list(fields))
+        return self.dm.project_meta(self.records["Customer"], max_fields=300)
+
+    def test_null_label_becomes_empty_string(self):
+        out = self._project(_NullableField("section_break", "Section Break", label=None))
+        self.assertEqual(out["fields"][0]["label"], "")
+
+    def test_null_fieldname_becomes_empty_string(self):
+        out = self._project(_NullableField(None, "Data", label="X"))
+        self.assertEqual(out["fields"][0]["fieldname"], "")
+
+    def test_null_fieldtype_becomes_empty_string(self):
+        out = self._project(_NullableField("f", None, label="X"))
+        self.assertEqual(out["fields"][0]["fieldtype"], "")
+
+    def test_null_flags_become_false(self):
+        out = self._project(_NullableField("f", "Data", label="X", reqd=None, read_only=None))
+        self.assertIs(out["fields"][0]["reqd"], False)
+        self.assertIs(out["fields"][0]["read_only"], False)
+
+    def test_integer_flags_become_booleans(self):
+        out = self._project(
+            _NullableField("a", "Data", label="A", reqd=1, read_only=0),
+            _NullableField("b", "Data", label="B", reqd=0, read_only=1))
+        self.assertIs(out["fields"][0]["reqd"], True)
+        self.assertIs(out["fields"][0]["read_only"], False)
+        self.assertIs(out["fields"][1]["reqd"], False)
+        self.assertIs(out["fields"][1]["read_only"], True)
+
+    def test_all_five_keys_present_on_every_entry(self):
+        out = self._project(
+            _NullableField("a", "Column Break", label=None),
+            _NullableField("b", "Data", label="B", reqd=1))
+        self.assertEqual(len(out["fields"]), 2)
+        for entry in out["fields"]:
+            self.assertEqual(set(entry), set(self.dm.PROJECTION_FIELDS))
+            self.assertEqual(sorted(entry), sorted(self.dm.PROJECTION_FIELDS))
+
+    def test_no_projected_value_is_none(self):
+        out = self._project(
+            _NullableField("a", "Section Break", label=None, reqd=None, read_only=None),
+            _NullableField("b", None, None, None, None),
+            _NullableField("c", "Data", label="C"))
+        for entry in out["fields"]:
+            for key, value in entry.items():
+                self.assertIsNotNone(value, "%s must not be None" % key)
+
+    def test_no_key_is_dropped_when_every_value_is_null(self):
+        out = self._project(_NullableField(None, None, None, None, None))
+        self.assertEqual(sorted(out["fields"][0]), sorted(self.dm.PROJECTION_FIELDS))
+        self.assertEqual(out["fields"][0],
+                         {"fieldname": "", "fieldtype": "", "label": "",
+                          "reqd": False, "read_only": False})
+
+    def test_valid_scalars_are_preserved_unchanged(self):
+        out = self._project(
+            _NullableField("customer_name", "Data", label="Customer Name", reqd=1))
+        entry = out["fields"][0]
+        self.assertEqual(entry["fieldname"], "customer_name")
+        self.assertEqual(entry["fieldtype"], "Data")
+        self.assertEqual(entry["label"], "Customer Name")
+        self.assertIs(entry["reqd"], True)
+        self.assertIs(entry["read_only"], False)
+
+    def test_non_null_non_flag_value_is_not_coerced_to_string(self):
+        """No blanket ``str(value)``: an unflagged value crosses untouched."""
+        marker = ["not", "a", "scalar"]
+        out = self._project(_NullableField("f", "Data", label=marker))
+        self.assertIs(out["fields"][0]["label"], marker)
+
+    def test_string_attributes_are_str_and_flags_are_bool(self):
+        out = self._project(
+            _NullableField("a", "Section Break", label=None, reqd=None, read_only=None),
+            _NullableField("b", "Data", label="B", reqd=1, read_only=0))
+        for entry in out["fields"]:
+            for key in self.STRING_KEYS:
+                self.assertIs(type(entry[key]), str, key)
+            for key in self.FLAG_KEYS:
+                # Exact type: a raw 0/1 integer from Frappe must have become
+                # a real bool. isinstance() alone cannot prove this, because
+                # bool is a subclass of int.
+                self.assertIs(type(entry[key]), bool, key)
+
+    def test_flag_field_set_is_declared_and_matches_the_projection(self):
+        self.assertEqual(set(self.dm.PROJECTION_FLAG_FIELDS), set(self.FLAG_KEYS))
+        self.assertTrue(set(self.dm.PROJECTION_FLAG_FIELDS)
+                        < set(self.dm.PROJECTION_FIELDS))
+
+    def test_attempt_metadata_also_yields_a_total_projection(self):
+        """End of the producer path, not just the helper: no null survives."""
+        self.add_meta("Customer", fields=[
+            _NullableField("section_break", "Section Break", label=None),
+            _NullableField("column_break", "Column Break", label=None),
+            _NullableField("description", "Small Text", label=None, reqd=None),
+        ])
+        self.set_policy("all")
+        out = self.dm.attempt_metadata({"doctype": "Customer"})
+        self.assertEqual(len(out["fields"]), 3)
+        for entry in out["fields"]:
+            self.assertEqual(sorted(entry), sorted(self.dm.PROJECTION_FIELDS))
+            for key, value in entry.items():
+                self.assertIsNotNone(value)
+
+
 class AuditTest(MetadataTestBase):
     def setUp(self):
         super().setUp()
